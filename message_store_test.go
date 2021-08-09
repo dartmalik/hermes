@@ -1,11 +1,11 @@
-package persistence
+package pubsub
 
 import "testing"
 
 func TestQueuePoll(t *testing.T) {
 	s := NewMessageStore()
-	q1 := QueueId("test_queue_1")
-	q2 := QueueId("test_queue_2")
+	q1 := StreamId("test_queue_1")
+	q2 := StreamId("test_queue_2")
 
 	s.Add(q1, []byte("001"), "m1")
 	s.Add(q1, []byte("002"), "m2")

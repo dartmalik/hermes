@@ -1,4 +1,4 @@
-package persistence
+package pubsub
 
 import (
 	"errors"
@@ -11,11 +11,11 @@ type MessageId []byte
 
 type Message struct {
 	id      MessageId
-	qid     QueueId
+	qid     StreamId
 	payload interface{}
 }
 
-type QueueId string
+type StreamId string
 
 type MessageStore struct {
 	m        sync.RWMutex
@@ -26,25 +26,25 @@ func NewMessageStore() *MessageStore {
 	return &MessageStore{messages: iradix.New()}
 }
 
-func (s *MessageStore) Add(qid QueueId, id MessageId, payload interface{}) error {
+func (s *MessageStore) Add(sid StreamId, id MessageId, payload interface{}) error {
 	if payload == nil {
 		return errors.New("invaid_message_payload")
 	}
-	if qid == "" {
+	if sid == "" {
 		return errors.New("invalid_queue_id")
 	}
 
 	s.m.Lock()
 	defer s.m.Unlock()
 
-	k := s.makeKey(qid, id)
-	m := &Message{id: id, qid: qid, payload: payload}
+	k := s.makeKey(sid, id)
+	m := &Message{id: id, qid: sid, payload: payload}
 	s.messages, _, _ = s.messages.Insert(k, m)
 
 	return nil
 }
 
-func (s *MessageStore) Remove(qid QueueId, count int) error {
+func (s *MessageStore) Remove(qid StreamId, count int) error {
 	if qid == "" {
 		return errors.New("invalid_queue_id")
 	}
@@ -77,7 +77,7 @@ func (s *MessageStore) Remove(qid QueueId, count int) error {
 	return nil
 }
 
-func (s *MessageStore) Peek(qid QueueId, count int) ([]interface{}, error) {
+func (s *MessageStore) Peek(qid StreamId, offset MessageId, count int) ([]interface{}, error) {
 	if qid == "" {
 		return nil, errors.New("invalid_queue_id")
 	}
@@ -93,7 +93,12 @@ func (s *MessageStore) Peek(qid QueueId, count int) ([]interface{}, error) {
 
 	out := make([]interface{}, 0, count)
 	it := s.messages.Root().Iterator()
-	it.SeekLowerBound([]byte(qid))
+
+	if offset == nil {
+		it.SeekLowerBound([]byte(qid))
+	} else {
+		it.SeekLowerBound(s.makeKey(qid, offset))
+	}
 
 	for _, i, ok := it.Next(); ok; _, i, ok = it.Next() {
 		m := i.(*Message)
@@ -110,8 +115,8 @@ func (s *MessageStore) Peek(qid QueueId, count int) ([]interface{}, error) {
 	return out, nil
 }
 
-func (s *MessageStore) Poll(qid QueueId, count int) ([]interface{}, error) {
-	m, err := s.Peek(qid, count)
+func (s *MessageStore) Poll(qid StreamId, count int) ([]interface{}, error) {
+	m, err := s.Peek(qid, nil, count)
 	if err != nil {
 		return nil, err
 	}
@@ -124,6 +129,6 @@ func (s *MessageStore) Poll(qid QueueId, count int) ([]interface{}, error) {
 	return m, nil
 }
 
-func (s *MessageStore) makeKey(qid QueueId, mid MessageId) []byte {
+func (s *MessageStore) makeKey(qid StreamId, mid MessageId) []byte {
 	return append([]byte(qid), mid...)
 }
