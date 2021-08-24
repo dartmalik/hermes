@@ -3,6 +3,9 @@ package pubsub
 import (
 	"errors"
 	"fmt"
+	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -74,6 +77,7 @@ func (sys *ActorSystem) send(m *ActorMessage) error {
 	if m.corId != "" {
 		r, ok := sys.requests[m.corId]
 		if ok && r.m.to == m.from {
+			fmt.Printf("[%d]replying to request\n", goid())
 			r.replyCh <- m
 			delete(sys.requests, m.corId)
 
@@ -126,6 +130,8 @@ func (a *TestActor) Receive(sys *ActorSystem, message *ActorMessage) {
 }
 
 func (a *TestActor) onSendPing(sys *ActorSystem, m *SendPing) {
+	fmt.Printf("[%d] onSendPing\n", goid())
+
 	reply := <-sys.request(a.id, m.to, &Ping{})
 
 	if _, ok := reply.payload.(*Pong); ok {
@@ -134,11 +140,24 @@ func (a *TestActor) onSendPing(sys *ActorSystem, m *SendPing) {
 }
 
 func (a *TestActor) onPing(sys *ActorSystem, m *ActorMessage) {
+	fmt.Printf("[%d] onPing\n", goid())
+
 	a.count++
 
 	fmt.Printf("received ping: %d\n", a.count)
 
 	sys.send(&ActorMessage{from: a.id, to: m.from, corId: m.corId, payload: &Pong{}})
+}
+
+func goid() int {
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	idField := strings.Fields(strings.TrimPrefix(string(buf[:n]), "goroutine "))[0]
+	id, err := strconv.Atoi(idField)
+	if err != nil {
+		panic(fmt.Sprintf("cannot get goroutine id: %v", err))
+	}
+	return id
 }
 
 func TestBasic(t *testing.T) {
@@ -177,7 +196,7 @@ func TestActorSys(t *testing.T) {
 		t.Fatalf("actor registeration failed with error: %s\n", err.Error())
 	}
 
-	for i := 0; i < 1; i++ {
+	for i := 0; i < 100; i++ {
 		go sys.send(&ActorMessage{from: a1.id, to: a1.id, payload: &SendPing{to: a2.id}})
 	}
 

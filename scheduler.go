@@ -88,22 +88,12 @@ func (w *worker) submitTask(r runnable) error {
 		return errors.New("invalid_runnable")
 	}
 
-	select {
-	case w.taskCh <- r:
-
-	case <-w.closeCh:
-		return InterruptionError
-	}
-
-	return nil
+	return w.tasks.Add(r)
 }
 
 func (w *worker) run() {
 	for {
 		select {
-		case r := <-w.taskCh:
-			w.onSubmitTask(r)
-
 		case <-w.closeCh:
 			return
 
@@ -120,10 +110,6 @@ func (w *worker) onProcess() {
 
 	r := w.tasks.Remove().(runnable)
 	r()
-}
-
-func (w *worker) onSubmitTask(r runnable) error {
-	return w.tasks.Add(r)
 }
 
 func (w *worker) close() {
