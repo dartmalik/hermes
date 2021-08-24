@@ -2,6 +2,7 @@ package pubsub
 
 import (
 	"errors"
+	"fmt"
 	"hash/maphash"
 	"sync"
 
@@ -133,6 +134,8 @@ func (w *worker) close() {
 // 2. Tasks are assigned to idle workers
 // 3. A task is a
 type Scheduler struct {
+	mu      sync.Mutex
+	hash    maphash.Hash
 	workers []worker
 }
 
@@ -154,14 +157,19 @@ func (s *Scheduler) run(r runnable) {
 }
 
 func (s *Scheduler) submit(key string, r runnable) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if key == "" {
 		key = uuid.NewV4().String()
 	}
 
-	var h maphash.Hash
-	h.WriteString(key)
-	hkey := h.Sum64()
+	s.hash.Reset()
+	s.hash.WriteString(key)
+	hkey := s.hash.Sum64()
 	ki := hkey % uint64(len(s.workers))
+
+	fmt.Printf("submitting to worker: %d\n", ki)
 
 	s.workers[ki].submitTask(r)
 }
