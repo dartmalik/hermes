@@ -18,15 +18,21 @@ type Actor interface {
 
 type ActorMessage struct {
 	from    ActorId
+	to      ActorId
 	corId   string
 	payload interface{}
+}
+
+type ActorRequest struct {
+	replyCh chan *ActorMessage
+	m       *ActorMessage
 }
 
 type ActorSystem struct {
 	mu        sync.Mutex
 	scheduler *Scheduler
 	actors    map[ActorId]Actor
-	requests  map[string]chan interface{}
+	requests  map[string]*ActorRequest
 }
 
 func NewActorSystem() (*ActorSystem, error) {
@@ -38,7 +44,7 @@ func NewActorSystem() (*ActorSystem, error) {
 	return &ActorSystem{
 		scheduler: s,
 		actors:    make(map[ActorId]Actor),
-		requests:  make(map[string]chan interface{}),
+		requests:  make(map[string]*ActorRequest),
 	}, nil
 }
 
@@ -56,36 +62,39 @@ func (sys *ActorSystem) register(key ActorId, a Actor) error {
 	return nil
 }
 
-func (sys *ActorSystem) send(key ActorId, message *ActorMessage) error {
+func (sys *ActorSystem) send(m *ActorMessage) error {
 	sys.mu.Lock()
 	defer sys.mu.Unlock()
 
-	a := sys.actors[key]
+	a := sys.actors[m.to]
 	if a == nil {
 		return errors.New("unregistered_actor")
 	}
 
-	sys.scheduler.submit(string(key), func() {
-		if message.corId == "" {
-			a.Receive(sys, message)
-		} else {
-			ch, ok := sys.requests[message.corId]
-			if ok {
-				ch <- message.payload
-				delete(sys.requests, message.corId)
-			}
+	if m.corId != "" {
+		r, ok := sys.requests[m.corId]
+		if ok && r.m.to == m.from {
+			r.replyCh <- m
+			delete(sys.requests, m.corId)
+
+			return nil
 		}
+	}
+
+	sys.scheduler.submit(string(m.to), func() {
+		a.Receive(sys, m)
 	})
 
 	return nil
 }
 
-func (sys *ActorSystem) request(from ActorId, to ActorId, request interface{}) chan interface{} {
-	m := &ActorMessage{from: from, corId: uuid.NewV4().String(), payload: request}
-	ch := make(chan interface{}, 1)
-	sys.requests[m.corId] = ch
+func (sys *ActorSystem) request(from ActorId, to ActorId, request interface{}) chan *ActorMessage {
+	m := &ActorMessage{from: from, to: to, corId: uuid.NewV4().String(), payload: request}
+	ch := make(chan *ActorMessage, 1)
+	r := &ActorRequest{replyCh: ch, m: m}
+	sys.requests[m.corId] = r
 
-	sys.send(to, m)
+	sys.send(m)
 
 	return ch
 }
@@ -117,9 +126,9 @@ func (a *TestActor) Receive(sys *ActorSystem, message *ActorMessage) {
 }
 
 func (a *TestActor) onSendPing(sys *ActorSystem, m *SendPing) {
-	res := <-sys.request(a.id, m.to, &Ping{})
+	reply := <-sys.request(a.id, m.to, &Ping{})
 
-	if _, ok := res.(*Pong); ok {
+	if _, ok := reply.payload.(*Pong); ok {
 		fmt.Printf("received pong\n")
 	}
 }
@@ -129,7 +138,7 @@ func (a *TestActor) onPing(sys *ActorSystem, m *ActorMessage) {
 
 	fmt.Printf("received ping: %d\n", a.count)
 
-	sys.send(m.from, &ActorMessage{from: a.id, payload: &Pong{}})
+	sys.send(&ActorMessage{from: a.id, to: m.from, corId: m.corId, payload: &Pong{}})
 }
 
 func TestBasic(t *testing.T) {
@@ -169,8 +178,8 @@ func TestActorSys(t *testing.T) {
 	}
 
 	for i := 0; i < 1; i++ {
-		go sys.send(a1.id, &ActorMessage{from: a1.id, payload: &SendPing{to: a2.id}})
+		go sys.send(&ActorMessage{from: a1.id, to: a1.id, payload: &SendPing{to: a2.id}})
 	}
 
-	time.Sleep(15000 * time.Millisecond)
+	time.Sleep(5000 * time.Millisecond)
 }
