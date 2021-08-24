@@ -3,9 +3,6 @@ package pubsub
 import (
 	"errors"
 	"fmt"
-	"runtime"
-	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,16 +10,16 @@ import (
 	"github.com/satori/uuid"
 )
 
-type ActorId string
+type ActorID string
 
 type Actor interface {
 	Receive(sys *ActorSystem, message *ActorMessage)
 }
 
 type ActorMessage struct {
-	from    ActorId
-	to      ActorId
-	corId   string
+	from    ActorID
+	to      ActorID
+	corID   string
 	payload interface{}
 }
 
@@ -34,7 +31,7 @@ type ActorRequest struct {
 type ActorSystem struct {
 	mu        sync.Mutex
 	scheduler *Scheduler
-	actors    map[ActorId]Actor
+	actors    map[ActorID]Actor
 	requests  map[string]*ActorRequest
 }
 
@@ -46,12 +43,12 @@ func NewActorSystem() (*ActorSystem, error) {
 
 	return &ActorSystem{
 		scheduler: s,
-		actors:    make(map[ActorId]Actor),
+		actors:    make(map[ActorID]Actor),
 		requests:  make(map[string]*ActorRequest),
 	}, nil
 }
 
-func (sys *ActorSystem) register(key ActorId, a Actor) error {
+func (sys *ActorSystem) register(key ActorID, a Actor) error {
 	if key == "" {
 		return errors.New("invalid_actor_key")
 	}
@@ -74,12 +71,11 @@ func (sys *ActorSystem) send(m *ActorMessage) error {
 		return errors.New("unregistered_actor")
 	}
 
-	if m.corId != "" {
-		r, ok := sys.requests[m.corId]
+	if m.corID != "" {
+		r, ok := sys.requests[m.corID]
 		if ok && r.m.to == m.from {
-			fmt.Printf("[%d]replying to request\n", goid())
 			r.replyCh <- m
-			delete(sys.requests, m.corId)
+			delete(sys.requests, m.corID)
 
 			return nil
 		}
@@ -92,11 +88,11 @@ func (sys *ActorSystem) send(m *ActorMessage) error {
 	return nil
 }
 
-func (sys *ActorSystem) request(from ActorId, to ActorId, request interface{}) chan *ActorMessage {
-	m := &ActorMessage{from: from, to: to, corId: uuid.NewV4().String(), payload: request}
+func (sys *ActorSystem) request(from ActorID, to ActorID, request interface{}) chan *ActorMessage {
+	m := &ActorMessage{from: from, to: to, corID: uuid.NewV4().String(), payload: request}
 	ch := make(chan *ActorMessage, 1)
 	r := &ActorRequest{replyCh: ch, m: m}
-	sys.requests[m.corId] = r
+	sys.requests[m.corID] = r
 
 	sys.send(m)
 
@@ -104,7 +100,7 @@ func (sys *ActorSystem) request(from ActorId, to ActorId, request interface{}) c
 }
 
 type SendPing struct {
-	to ActorId
+	to ActorID
 }
 
 type Ping struct{}
@@ -112,7 +108,7 @@ type Ping struct{}
 type Pong struct{}
 
 type TestActor struct {
-	id    ActorId
+	id    ActorID
 	count int
 }
 
@@ -130,7 +126,7 @@ func (a *TestActor) Receive(sys *ActorSystem, message *ActorMessage) {
 }
 
 func (a *TestActor) onSendPing(sys *ActorSystem, m *SendPing) {
-	fmt.Printf("[%d] onSendPing\n", goid())
+	//fmt.Printf("[%d] onSendPing\n", goid())
 
 	reply := <-sys.request(a.id, m.to, &Ping{})
 
@@ -140,15 +136,16 @@ func (a *TestActor) onSendPing(sys *ActorSystem, m *SendPing) {
 }
 
 func (a *TestActor) onPing(sys *ActorSystem, m *ActorMessage) {
-	fmt.Printf("[%d] onPing\n", goid())
+	//fmt.Printf("[%d] onPing\n", goid())
 
 	a.count++
 
 	fmt.Printf("received ping: %d\n", a.count)
 
-	sys.send(&ActorMessage{from: a.id, to: m.from, corId: m.corId, payload: &Pong{}})
+	sys.send(&ActorMessage{from: a.id, to: m.from, corID: m.corID, payload: &Pong{}})
 }
 
+/*
 func goid() int {
 	var buf [64]byte
 	n := runtime.Stack(buf[:], false)
@@ -159,6 +156,7 @@ func goid() int {
 	}
 	return id
 }
+*/
 
 func TestBasic(t *testing.T) {
 	s, err := NewScheduler(4)

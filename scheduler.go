@@ -9,8 +9,8 @@ import (
 	"github.com/satori/uuid"
 )
 
-var InterruptionError = errors.New("interrupted")
-var IllegalStateError = errors.New("no_capacity")
+var ErrInterruption = errors.New("interrupted")
+var ErrIllegalState = errors.New("no_capacity")
 
 type Queue struct {
 	mu       sync.Mutex
@@ -28,7 +28,7 @@ func (q *Queue) Add(element interface{}) error {
 	defer q.mu.Unlock()
 
 	if len(q.elements) > 8192 {
-		return IllegalStateError
+		return ErrIllegalState
 	}
 
 	q.tail++
@@ -116,9 +116,6 @@ func (w *worker) close() {
 	close(w.closeCh)
 }
 
-// 1. Clients can submit tasks that are queued
-// 2. Tasks are assigned to idle workers
-// 3. A task is a
 type Scheduler struct {
 	mu      sync.Mutex
 	hash    maphash.Hash
