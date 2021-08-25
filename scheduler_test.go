@@ -54,16 +54,16 @@ func (a *TestActor) onPing(sys *ActorSystem, msg ActorMessage) {
 }
 
 func TestBasic(t *testing.T) {
-	s, err := NewScheduler()
+	e, err := NewExecutor()
 	if err != nil {
 		t.Fatalf("scheduler creation failed with error: %s\n", err.Error())
 	}
 
-	s.Run(func() {
+	e.Run(func() {
 		fmt.Printf("ran 1\n")
 	})
 
-	s.Run(func() {
+	e.Run(func() {
 		fmt.Printf("ran 2\n")
 	})
 

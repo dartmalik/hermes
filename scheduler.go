@@ -127,73 +127,73 @@ func (w *worker) close() {
 	close(w.closeCh)
 }
 
-type Scheduler struct {
+type Executor struct {
 	mu        sync.RWMutex
 	workers   map[string]*worker
 	closeOnce sync.Once
 	closeCh   chan struct{}
 }
 
-func NewScheduler() (*Scheduler, error) {
-	s := &Scheduler{
+func NewExecutor() (*Executor, error) {
+	e := &Executor{
 		workers: make(map[string]*worker),
 		closeCh: make(chan struct{}, 1),
 	}
 
-	go s.pump()
+	go e.pump()
 
-	return s, nil
+	return e, nil
 }
 
-func (s *Scheduler) Close() {
-	s.closeOnce.Do(func() {
-		close(s.closeCh)
+func (e *Executor) Close() {
+	e.closeOnce.Do(func() {
+		close(e.closeCh)
 	})
 }
 
-func (s *Scheduler) Run(r runnable) {
-	s.Submit("", r)
+func (e *Executor) Run(r runnable) {
+	e.Submit("", r)
 }
 
-func (s *Scheduler) Submit(key string, r runnable) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (e *Executor) Submit(key string, r runnable) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
 	if key == "" {
 		key = uuid.NewV4().String()
 	}
 
-	w, ok := s.workers[key]
+	w, ok := e.workers[key]
 	if !ok {
 		//fmt.Printf("creating worker\n")
 
 		w = newWorker()
-		s.workers[key] = w
+		e.workers[key] = w
 	}
 
 	w.submitTask(r)
 }
 
-func (s *Scheduler) pump() {
+func (e *Executor) pump() {
 	for {
 		select {
 		case <-time.After(1500 * time.Millisecond):
-			s.removeIdleWorkers()
+			e.removeIdleWorkers()
 
-		case <-s.closeCh:
+		case <-e.closeCh:
 			return
 		}
 	}
 }
 
-func (s *Scheduler) removeIdleWorkers() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (e *Executor) removeIdleWorkers() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
-	for k, w := range s.workers {
+	for k, w := range e.workers {
 		if w.backlog() <= 0 {
 			w.close()
-			delete(s.workers, k)
+			delete(e.workers, k)
 		}
 	}
 }
@@ -225,22 +225,22 @@ func (m *actorMessage) Payload() interface{} {
 }
 
 type ActorSystem struct {
-	mu        sync.Mutex
-	scheduler *Scheduler
-	actors    map[ActorID]Actor
-	requests  map[string]*actorMessage
+	mu       sync.Mutex
+	exec     *Executor
+	actors   map[ActorID]Actor
+	requests map[string]*actorMessage
 }
 
 func NewActorSystem() (*ActorSystem, error) {
-	s, err := NewScheduler()
+	e, err := NewExecutor()
 	if err != nil {
 		return nil, err
 	}
 
 	return &ActorSystem{
-		scheduler: s,
-		actors:    make(map[ActorID]Actor),
-		requests:  make(map[string]*actorMessage),
+		exec:     e,
+		actors:   make(map[ActorID]Actor),
+		requests: make(map[string]*actorMessage),
 	}, nil
 }
 
@@ -311,7 +311,7 @@ func (sys *ActorSystem) localSend(msg *actorMessage) error {
 		}
 	}
 
-	sys.scheduler.Submit(string(msg.to), func() {
+	sys.exec.Submit(string(msg.to), func() {
 		a.Receive(sys, msg)
 	})
 
