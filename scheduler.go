@@ -128,16 +128,13 @@ func (w *worker) close() {
 }
 
 type Scheduler struct {
-	mu      sync.RWMutex
-	workers map[string]*worker
-	closeCh chan struct{}
+	mu        sync.RWMutex
+	workers   map[string]*worker
+	closeOnce sync.Once
+	closeCh   chan struct{}
 }
 
-func NewScheduler(size int) (*Scheduler, error) {
-	if size <= 0 {
-		return nil, errors.New("invalid_pool_size")
-	}
-
+func NewScheduler() (*Scheduler, error) {
 	s := &Scheduler{
 		workers: make(map[string]*worker),
 		closeCh: make(chan struct{}, 1),
@@ -149,7 +146,9 @@ func NewScheduler(size int) (*Scheduler, error) {
 }
 
 func (s *Scheduler) Close() {
-	close(s.closeCh)
+	s.closeOnce.Do(func() {
+		close(s.closeCh)
+	})
 }
 
 func (s *Scheduler) Run(r runnable) {
@@ -166,7 +165,7 @@ func (s *Scheduler) Submit(key string, r runnable) {
 
 	w, ok := s.workers[key]
 	if !ok {
-		fmt.Printf("creating worker\n")
+		//fmt.Printf("creating worker\n")
 
 		w = newWorker()
 		s.workers[key] = w
@@ -233,7 +232,7 @@ type ActorSystem struct {
 }
 
 func NewActorSystem() (*ActorSystem, error) {
-	s, err := NewScheduler(16)
+	s, err := NewScheduler()
 	if err != nil {
 		return nil, err
 	}
