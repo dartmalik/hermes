@@ -16,7 +16,6 @@ import (
 	- (location-transparency) scalability by spreading out state to a cluster
 */
 
-var ErrInterruption = errors.New("interrupted")
 var ErrIllegalState = errors.New("no_capacity")
 
 type Queue struct {
