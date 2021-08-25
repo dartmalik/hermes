@@ -3,11 +3,18 @@ package pubsub
 import (
 	"errors"
 	"fmt"
-	"hash/maphash"
 	"sync"
+	"time"
 
 	"github.com/satori/uuid"
 )
+
+/*
+	goals:
+	- (no-locks, no-async) single threaded, synchronous execution of app code
+	- (single-source-of-exec) each actor can linearize commands by executing one command at a time
+	- (location-transparency) scalability by spreading out state to a cluster
+*/
 
 var ErrInterruption = errors.New("interrupted")
 var ErrIllegalState = errors.New("no_capacity")
@@ -91,6 +98,10 @@ func (w *worker) submitTask(r runnable) error {
 	return w.tasks.Add(r)
 }
 
+func (w *worker) backlog() int {
+	return w.tasks.Size()
+}
+
 func (w *worker) run() {
 	for {
 		select {
@@ -117,9 +128,9 @@ func (w *worker) close() {
 }
 
 type Scheduler struct {
-	mu      sync.Mutex
-	hash    maphash.Hash
-	workers []worker
+	mu      sync.RWMutex
+	workers map[string]*worker
+	closeCh chan struct{}
 }
 
 func NewScheduler(size int) (*Scheduler, error) {
@@ -127,19 +138,25 @@ func NewScheduler(size int) (*Scheduler, error) {
 		return nil, errors.New("invalid_pool_size")
 	}
 
-	w := make([]worker, size)
-	for wi := 0; wi < size; wi++ {
-		w[wi] = *newWorker()
+	s := &Scheduler{
+		workers: make(map[string]*worker),
+		closeCh: make(chan struct{}, 1),
 	}
 
-	return &Scheduler{workers: w}, nil
+	go s.pump()
+
+	return s, nil
 }
 
-func (s *Scheduler) run(r runnable) {
-	s.submit("", r)
+func (s *Scheduler) Close() {
+	close(s.closeCh)
 }
 
-func (s *Scheduler) submit(key string, r runnable) {
+func (s *Scheduler) Run(r runnable) {
+	s.Submit("", r)
+}
+
+func (s *Scheduler) Submit(key string, r runnable) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -147,12 +164,168 @@ func (s *Scheduler) submit(key string, r runnable) {
 		key = uuid.NewV4().String()
 	}
 
-	s.hash.Reset()
-	s.hash.WriteString(key)
-	hkey := s.hash.Sum64()
-	ki := hkey % uint64(len(s.workers))
+	w, ok := s.workers[key]
+	if !ok {
+		fmt.Printf("creating worker\n")
 
-	fmt.Printf("submitting to worker: %d\n", ki)
+		w = newWorker()
+		s.workers[key] = w
+	}
 
-	s.workers[ki].submitTask(r)
+	w.submitTask(r)
+
+	/*
+		s.hash.Reset()
+		s.hash.WriteString(key)
+		hkey := s.hash.Sum64()
+		ki := hkey % uint64(len(s.workers))
+
+		fmt.Printf("submitting to worker: %d\n", ki)
+
+		s.workers[ki].submitTask(r)
+	*/
+}
+
+func (s *Scheduler) pump() {
+	for {
+		select {
+		case <-time.After(1500 * time.Millisecond):
+			s.removeIdleWorkers()
+
+		case <-s.closeCh:
+			return
+		}
+	}
+}
+
+func (s *Scheduler) removeIdleWorkers() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for k, w := range s.workers {
+		if w.backlog() <= 0 {
+			w.close()
+			delete(s.workers, k)
+		}
+	}
+}
+
+type ActorID string
+
+type Actor interface {
+	Receive(sys *ActorSystem, msg ActorMessage)
+}
+
+type ActorMessage interface {
+	Payload() interface{}
+}
+
+type actorMessage struct {
+	from    ActorID
+	to      ActorID
+	corID   string
+	payload interface{}
+	replyCh chan ActorMessage
+}
+
+func (m *actorMessage) isRequest() bool {
+	return m.replyCh != nil
+}
+
+func (m *actorMessage) Payload() interface{} {
+	return m.payload
+}
+
+type ActorSystem struct {
+	mu        sync.Mutex
+	scheduler *Scheduler
+	actors    map[ActorID]Actor
+	requests  map[string]*actorMessage
+}
+
+func NewActorSystem() (*ActorSystem, error) {
+	s, err := NewScheduler(16)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ActorSystem{
+		scheduler: s,
+		actors:    make(map[ActorID]Actor),
+		requests:  make(map[string]*actorMessage),
+	}, nil
+}
+
+func (sys *ActorSystem) Register(key ActorID, a Actor) error {
+	if key == "" {
+		return errors.New("invalid_actor_key")
+	}
+
+	sys.mu.Lock()
+	defer sys.mu.Unlock()
+
+	if _, ok := sys.actors[key]; ok {
+		fmt.Printf("[WARN] actor already registered")
+	}
+
+	sys.actors[key] = a
+
+	return nil
+}
+
+func (sys *ActorSystem) Send(from ActorID, to ActorID, payload interface{}) error {
+	return sys.localSend(&actorMessage{from: from, to: to, payload: payload})
+}
+
+func (sys *ActorSystem) Request(from ActorID, to ActorID, request interface{}) chan ActorMessage {
+	m := &actorMessage{from: from, to: to, corID: uuid.NewV4().String(), payload: request, replyCh: make(chan ActorMessage)}
+
+	sys.localSend(m)
+
+	return m.replyCh
+}
+
+func (sys *ActorSystem) Reply(msg ActorMessage, reply interface{}) error {
+	am, ok := msg.(*actorMessage)
+	if !ok {
+		return errors.New("invalid_message")
+	}
+
+	return sys.localSend(&actorMessage{from: am.to, to: am.from, corID: am.corID, payload: reply})
+}
+
+func (sys *ActorSystem) localSend(msg *actorMessage) error {
+	sys.mu.Lock()
+	defer sys.mu.Unlock()
+
+	a := sys.actors[msg.to]
+	if a == nil {
+		return errors.New("unregistered_actor")
+	}
+
+	if msg.corID != "" {
+		if msg.isRequest() {
+			if _, ok := sys.requests[msg.corID]; ok {
+				return errors.New("request_already_exists")
+			}
+
+			sys.requests[msg.corID] = msg
+		} else {
+			r, ok := sys.requests[msg.corID]
+			if ok {
+				r.replyCh <- msg
+				delete(sys.requests, msg.corID)
+
+				return nil
+			} else {
+				return errors.New("invalid_reply_correlation-id")
+			}
+		}
+	}
+
+	sys.scheduler.Submit(string(msg.to), func() {
+		a.Receive(sys, msg)
+	})
+
+	return nil
 }

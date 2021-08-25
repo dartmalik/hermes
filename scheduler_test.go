@@ -1,103 +1,10 @@
 package pubsub
 
 import (
-	"errors"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
-
-	"github.com/satori/uuid"
 )
-
-type ActorID string
-
-type Actor interface {
-	Receive(sys *ActorSystem, message *ActorMessage)
-}
-
-type ActorMessage struct {
-	from    ActorID
-	to      ActorID
-	corID   string
-	payload interface{}
-}
-
-type ActorRequest struct {
-	replyCh chan *ActorMessage
-	m       *ActorMessage
-}
-
-type ActorSystem struct {
-	mu        sync.Mutex
-	scheduler *Scheduler
-	actors    map[ActorID]Actor
-	requests  map[string]*ActorRequest
-}
-
-func NewActorSystem() (*ActorSystem, error) {
-	s, err := NewScheduler(16)
-	if err != nil {
-		return nil, err
-	}
-
-	return &ActorSystem{
-		scheduler: s,
-		actors:    make(map[ActorID]Actor),
-		requests:  make(map[string]*ActorRequest),
-	}, nil
-}
-
-func (sys *ActorSystem) register(key ActorID, a Actor) error {
-	if key == "" {
-		return errors.New("invalid_actor_key")
-	}
-
-	if _, ok := sys.actors[key]; ok {
-		fmt.Printf("[WARN] actor already registered")
-	}
-
-	sys.actors[key] = a
-
-	return nil
-}
-
-func (sys *ActorSystem) send(m *ActorMessage) error {
-	sys.mu.Lock()
-	defer sys.mu.Unlock()
-
-	a := sys.actors[m.to]
-	if a == nil {
-		return errors.New("unregistered_actor")
-	}
-
-	if m.corID != "" {
-		r, ok := sys.requests[m.corID]
-		if ok && r.m.to == m.from {
-			r.replyCh <- m
-			delete(sys.requests, m.corID)
-
-			return nil
-		}
-	}
-
-	sys.scheduler.submit(string(m.to), func() {
-		a.Receive(sys, m)
-	})
-
-	return nil
-}
-
-func (sys *ActorSystem) request(from ActorID, to ActorID, request interface{}) chan *ActorMessage {
-	m := &ActorMessage{from: from, to: to, corID: uuid.NewV4().String(), payload: request}
-	ch := make(chan *ActorMessage, 1)
-	r := &ActorRequest{replyCh: ch, m: m}
-	sys.requests[m.corID] = r
-
-	sys.send(m)
-
-	return ch
-}
 
 type SendPing struct {
 	to ActorID
@@ -112,37 +19,38 @@ type TestActor struct {
 	count int
 }
 
-func (a *TestActor) Receive(sys *ActorSystem, message *ActorMessage) {
-	switch t := message.payload.(type) {
+func (a *TestActor) Receive(sys *ActorSystem, msg ActorMessage) {
+	switch t := msg.Payload().(type) {
 	case *SendPing:
-		a.onSendPing(sys, message.payload.(*SendPing))
+		a.onSendPing(sys, msg)
 
 	case *Ping:
-		a.onPing(sys, message)
+		a.onPing(sys, msg)
 
 	default:
-		fmt.Printf("received unkown messge: %s\n", t)
+		fmt.Printf("received unkown message: %s\n", t)
 	}
 }
 
-func (a *TestActor) onSendPing(sys *ActorSystem, m *SendPing) {
+func (a *TestActor) onSendPing(sys *ActorSystem, msg ActorMessage) {
 	//fmt.Printf("[%d] onSendPing\n", goid())
+	sp := msg.Payload().(*SendPing)
 
-	reply := <-sys.request(a.id, m.to, &Ping{})
+	reply := <-sys.Request(a.id, sp.to, &Ping{})
 
-	if _, ok := reply.payload.(*Pong); ok {
+	if _, ok := reply.Payload().(*Pong); ok {
 		fmt.Printf("received pong\n")
 	}
 }
 
-func (a *TestActor) onPing(sys *ActorSystem, m *ActorMessage) {
+func (a *TestActor) onPing(sys *ActorSystem, msg ActorMessage) {
 	//fmt.Printf("[%d] onPing\n", goid())
 
 	a.count++
 
 	fmt.Printf("received ping: %d\n", a.count)
 
-	sys.send(&ActorMessage{from: a.id, to: m.from, corID: m.corID, payload: &Pong{}})
+	sys.Reply(msg, &Pong{})
 }
 
 /*
@@ -164,11 +72,11 @@ func TestBasic(t *testing.T) {
 		t.Fatalf("scheduler creation failed with error: %s\n", err.Error())
 	}
 
-	s.run(func() {
+	s.Run(func() {
 		fmt.Printf("ran 1\n")
 	})
 
-	s.run(func() {
+	s.Run(func() {
 		fmt.Printf("ran 2\n")
 	})
 
@@ -184,19 +92,19 @@ func TestActorSys(t *testing.T) {
 	a1 := &TestActor{id: "t1"}
 	a2 := &TestActor{id: "t2"}
 
-	err = sys.register(a1.id, a1)
+	err = sys.Register(a1.id, a1)
 	if err != nil {
 		t.Fatalf("actor registeration failed with error: %s\n", err.Error())
 	}
 
-	err = sys.register(a2.id, a2)
+	err = sys.Register(a2.id, a2)
 	if err != nil {
 		t.Fatalf("actor registeration failed with error: %s\n", err.Error())
 	}
 
 	for i := 0; i < 100; i++ {
-		go sys.send(&ActorMessage{from: a1.id, to: a1.id, payload: &SendPing{to: a2.id}})
+		sys.Send(a1.id, a1.id, &SendPing{to: a2.id})
 	}
 
-	time.Sleep(5000 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 }
