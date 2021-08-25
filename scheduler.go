@@ -173,17 +173,6 @@ func (s *Scheduler) Submit(key string, r runnable) {
 	}
 
 	w.submitTask(r)
-
-	/*
-		s.hash.Reset()
-		s.hash.WriteString(key)
-		hkey := s.hash.Sum64()
-		ki := hkey % uint64(len(s.workers))
-
-		fmt.Printf("submitting to worker: %d\n", ki)
-
-		s.workers[ki].submitTask(r)
-	*/
 }
 
 func (s *Scheduler) pump() {
