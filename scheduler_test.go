@@ -14,12 +14,12 @@ type Ping struct{}
 
 type Pong struct{}
 
-type TestActor struct {
+type PongActor struct {
 	id    ActorID
 	count int
 }
 
-func (a *TestActor) Receive(sys *ActorSystem, msg ActorMessage) {
+func (a *PongActor) Receive(sys *ActorSystem, msg ActorMessage) {
 	switch t := msg.Payload().(type) {
 	case *SendPing:
 		a.onSendPing(sys, msg)
@@ -32,20 +32,21 @@ func (a *TestActor) Receive(sys *ActorSystem, msg ActorMessage) {
 	}
 }
 
-func (a *TestActor) onSendPing(sys *ActorSystem, msg ActorMessage) {
-	//fmt.Printf("[%d] onSendPing\n", goid())
+func (a *PongActor) onSendPing(sys *ActorSystem, msg ActorMessage) {
 	sp := msg.Payload().(*SendPing)
 
-	reply := <-sys.Request(a.id, sp.to, &Ping{})
+	reply, err := sys.RequestWithTimeout(a.id, sp.to, &Ping{}, 1500*time.Millisecond)
+	if err != nil {
+		fmt.Println("request timed out")
+		return
+	}
 
 	if _, ok := reply.Payload().(*Pong); ok {
 		fmt.Printf("received pong\n")
 	}
 }
 
-func (a *TestActor) onPing(sys *ActorSystem, msg ActorMessage) {
-	//fmt.Printf("[%d] onPing\n", goid())
-
+func (a *PongActor) onPing(sys *ActorSystem, msg ActorMessage) {
 	a.count++
 
 	fmt.Printf("received ping: %d\n", a.count)
@@ -76,8 +77,8 @@ func TestActorSys(t *testing.T) {
 		t.Fatalf("new actor system failed with error: %s\n", err.Error())
 	}
 
-	a1 := &TestActor{id: "t1"}
-	a2 := &TestActor{id: "t2"}
+	a1 := &PongActor{id: "t1"}
+	a2 := &PongActor{id: "t2"}
 
 	err = sys.Register(a1.id, a1)
 	if err != nil {

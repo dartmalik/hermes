@@ -273,6 +273,16 @@ func (sys *ActorSystem) Request(from ActorID, to ActorID, request interface{}) c
 	return m.replyCh
 }
 
+func (sys *ActorSystem) RequestWithTimeout(from ActorID, to ActorID, request interface{}, timeout time.Duration) (ActorMessage, error) {
+	select {
+	case reply := <-sys.Request(from, to, request):
+		return reply, nil
+
+	case <-time.After(timeout):
+		return nil, errors.New("request_timeout")
+	}
+}
+
 func (sys *ActorSystem) Reply(msg ActorMessage, reply interface{}) error {
 	am, ok := msg.(*actorMessage)
 	if !ok {
