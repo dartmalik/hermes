@@ -1,4 +1,4 @@
-package pubsub
+package hermes
 
 import (
 	"errors"
@@ -200,7 +200,6 @@ type ActorID string
 type Receiver func(ctx *ActorContext, msg ActorMessage)
 
 type ActorContext struct {
-	mu   sync.Mutex
 	id   ActorID
 	sys  *ActorSystem
 	recv Receiver
@@ -221,10 +220,11 @@ func newActorContext(id ActorID, sys *ActorSystem, recv Receiver) (*ActorContext
 }
 
 func (ctx *ActorContext) SetReceiver(recv Receiver) {
-	ctx.mu.Lock()
-	defer ctx.mu.Unlock()
-
 	ctx.recv = recv
+}
+
+func (ctx *ActorContext) Register(id ActorID, recv Receiver) error {
+	return ctx.sys.Register(id, recv)
 }
 
 func (ctx *ActorContext) Send(to ActorID, payload interface{}) error {
@@ -247,6 +247,12 @@ func (ctx *ActorContext) Reply(msg ActorMessage, reply interface{}) error {
 
 	return ctx.sys.reply(msg, reply)
 }
+
+type Registered struct{}
+
+type Unregistering struct{}
+
+type Unregistered struct{}
 
 type ActorMessage interface {
 	Payload() interface{}
@@ -289,6 +295,21 @@ func NewActorSystem() (*ActorSystem, error) {
 }
 
 func (sys *ActorSystem) Register(id ActorID, a Receiver) error {
+	err := sys.doRegister(id, a)
+	if err != nil {
+		return err
+	}
+
+	//sys.Send("", id, &Registered{})
+
+	return nil
+}
+
+func (sys *ActorSystem) Send(from ActorID, to ActorID, payload interface{}) error {
+	return sys.localSend(&actorMessage{from: from, to: to, payload: payload})
+}
+
+func (sys *ActorSystem) doRegister(id ActorID, a Receiver) error {
 	if id == "" {
 		return errors.New("invalid_actor_id")
 	}
@@ -308,10 +329,6 @@ func (sys *ActorSystem) Register(id ActorID, a Receiver) error {
 	sys.actors[id] = ctx
 
 	return nil
-}
-
-func (sys *ActorSystem) Send(from ActorID, to ActorID, payload interface{}) error {
-	return sys.localSend(&actorMessage{from: from, to: to, payload: payload})
 }
 
 func (sys *ActorSystem) request(from ActorID, to ActorID, request interface{}) chan ActorMessage {
@@ -351,7 +368,7 @@ func (sys *ActorSystem) localSend(msg *actorMessage) error {
 	}
 
 	if msg.corID != "" {
-		if msg.isRequest() {
+		if msg.isRequest() && msg.from != "" {
 			if _, ok := sys.requests[msg.corID]; ok {
 				return errors.New("request_already_exists")
 			}
