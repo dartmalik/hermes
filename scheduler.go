@@ -2,7 +2,6 @@ package pubsub
 
 import (
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -15,7 +14,6 @@ import (
 	- (single-source-of-exec) each actor can linearize commands by executing one command at a time
 	- (location-transparency) scalability by spreading out state to a cluster
 */
-
 var ErrIllegalState = errors.New("no_capacity")
 
 type Queue struct {
@@ -199,8 +197,55 @@ func (e *Executor) removeIdleWorkers() {
 
 type ActorID string
 
-type Actor interface {
-	Receive(sys *ActorSystem, msg ActorMessage)
+type Receiver func(ctx *ActorContext, msg ActorMessage)
+
+type ActorContext struct {
+	mu   sync.Mutex
+	id   ActorID
+	sys  *ActorSystem
+	recv Receiver
+}
+
+func newActorContext(id ActorID, sys *ActorSystem, recv Receiver) (*ActorContext, error) {
+	if id == "" {
+		return nil, errors.New("invalid_actor_id")
+	}
+	if sys == nil {
+		return nil, errors.New("invalid_system")
+	}
+	if recv == nil {
+		return nil, errors.New("invalid_receiver")
+	}
+
+	return &ActorContext{id: id, sys: sys, recv: recv}, nil
+}
+
+func (ctx *ActorContext) SetReceiver(recv Receiver) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
+	ctx.recv = recv
+}
+
+func (ctx *ActorContext) Send(to ActorID, payload interface{}) error {
+	return ctx.sys.Send(ctx.id, to, payload)
+}
+
+func (ctx *ActorContext) Request(to ActorID, request interface{}) chan ActorMessage {
+	return ctx.sys.request(ctx.id, to, request)
+}
+
+func (ctx *ActorContext) RequestWithTimeout(to ActorID, request interface{}, timeout time.Duration) (ActorMessage, error) {
+	return ctx.sys.requestWithTimeout(ctx.id, to, request, timeout)
+}
+
+func (ctx *ActorContext) Reply(msg ActorMessage, reply interface{}) error {
+	am := msg.(*actorMessage)
+	if am.to != ctx.id {
+		return errors.New("not_the_recipient")
+	}
+
+	return ctx.sys.reply(msg, reply)
 }
 
 type ActorMessage interface {
@@ -226,7 +271,7 @@ func (m *actorMessage) Payload() interface{} {
 type ActorSystem struct {
 	mu       sync.Mutex
 	exec     *Executor
-	actors   map[ActorID]Actor
+	actors   map[ActorID]*ActorContext
 	requests map[string]*actorMessage
 }
 
@@ -238,24 +283,29 @@ func NewActorSystem() (*ActorSystem, error) {
 
 	return &ActorSystem{
 		exec:     e,
-		actors:   make(map[ActorID]Actor),
+		actors:   make(map[ActorID]*ActorContext),
 		requests: make(map[string]*actorMessage),
 	}, nil
 }
 
-func (sys *ActorSystem) Register(key ActorID, a Actor) error {
-	if key == "" {
-		return errors.New("invalid_actor_key")
+func (sys *ActorSystem) Register(id ActorID, a Receiver) error {
+	if id == "" {
+		return errors.New("invalid_actor_id")
 	}
 
 	sys.mu.Lock()
 	defer sys.mu.Unlock()
 
-	if _, ok := sys.actors[key]; ok {
-		fmt.Printf("[WARN] actor already registered")
+	if _, ok := sys.actors[id]; ok {
+		return errors.New("already_registered")
 	}
 
-	sys.actors[key] = a
+	ctx, err := newActorContext(id, sys, a)
+	if err != nil {
+		return err
+	}
+
+	sys.actors[id] = ctx
 
 	return nil
 }
@@ -264,7 +314,7 @@ func (sys *ActorSystem) Send(from ActorID, to ActorID, payload interface{}) erro
 	return sys.localSend(&actorMessage{from: from, to: to, payload: payload})
 }
 
-func (sys *ActorSystem) Request(from ActorID, to ActorID, request interface{}) chan ActorMessage {
+func (sys *ActorSystem) request(from ActorID, to ActorID, request interface{}) chan ActorMessage {
 	m := &actorMessage{from: from, to: to, corID: uuid.NewV4().String(), payload: request, replyCh: make(chan ActorMessage)}
 
 	sys.localSend(m)
@@ -272,9 +322,9 @@ func (sys *ActorSystem) Request(from ActorID, to ActorID, request interface{}) c
 	return m.replyCh
 }
 
-func (sys *ActorSystem) RequestWithTimeout(from ActorID, to ActorID, request interface{}, timeout time.Duration) (ActorMessage, error) {
+func (sys *ActorSystem) requestWithTimeout(from ActorID, to ActorID, request interface{}, timeout time.Duration) (ActorMessage, error) {
 	select {
-	case reply := <-sys.Request(from, to, request):
+	case reply := <-sys.request(from, to, request):
 		return reply, nil
 
 	case <-time.After(timeout):
@@ -282,7 +332,7 @@ func (sys *ActorSystem) RequestWithTimeout(from ActorID, to ActorID, request int
 	}
 }
 
-func (sys *ActorSystem) Reply(msg ActorMessage, reply interface{}) error {
+func (sys *ActorSystem) reply(msg ActorMessage, reply interface{}) error {
 	am, ok := msg.(*actorMessage)
 	if !ok {
 		return errors.New("invalid_message")
@@ -295,8 +345,8 @@ func (sys *ActorSystem) localSend(msg *actorMessage) error {
 	sys.mu.Lock()
 	defer sys.mu.Unlock()
 
-	a := sys.actors[msg.to]
-	if a == nil {
+	ctx := sys.actors[msg.to]
+	if ctx == nil {
 		return errors.New("unregistered_actor")
 	}
 
@@ -321,7 +371,7 @@ func (sys *ActorSystem) localSend(msg *actorMessage) error {
 	}
 
 	sys.exec.Submit(string(msg.to), func() {
-		a.Receive(sys, msg)
+		ctx.recv(ctx, msg)
 	})
 
 	return nil
