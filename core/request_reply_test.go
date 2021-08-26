@@ -73,7 +73,7 @@ func (grp *IOTDeviceGroup) onAddDevice(ctx *ActorContext, msg ActorMessage) {
 }
 
 func (grp *IOTDeviceGroup) onMeasure(ctx *ActorContext, msg ActorMessage) {
-	values := make([]float32, len(grp.devices))
+	values := make([]float32, 0, len(grp.devices))
 
 	for id := range grp.devices {
 		reply, err := ctx.RequestWithTimeout(id, &IOTDeviceMeasureRequest{}, 100*time.Millisecond)
@@ -100,6 +100,7 @@ type IOTTester struct {
 	t           *testing.T
 	grp         ActorID
 	deviceCount int
+	closeCh     chan struct{}
 }
 
 func (test *IOTTester) receive(ctx *ActorContext, msg ActorMessage) {
@@ -108,6 +109,8 @@ func (test *IOTTester) receive(ctx *ActorContext, msg ActorMessage) {
 		test.addDevices(ctx)
 
 		test.measure(ctx)
+
+		close(test.closeCh)
 
 	default:
 		test.t.Fatalf("unknown message type: %s\n", ty)
@@ -158,14 +161,13 @@ func TestRequestReply(t *testing.T) {
 		t.Fatalf("new actor system failed with error: %s\n", err.Error())
 	}
 
-	gid := ActorID("iot-dev-grp")
 	grp := newIOTDeviceGroup()
-	err = sys.Register(gid, grp.receive)
+	err = sys.Register(ActorID("iot-dev-grp"), grp.receive)
 	if err != nil {
 		t.Fatalf("failed to register device group: %s\n", err.Error())
 	}
 
-	tester := &IOTTester{t: t, grp: "iot-dev-grp", deviceCount: 10}
+	tester := &IOTTester{t: t, grp: "iot-dev-grp", deviceCount: 10, closeCh: make(chan struct{}, 1)}
 	err = sys.Register("test", tester.receive)
 	if err != nil {
 		t.Fatalf("failed to register tester: %s\n", err.Error())
@@ -176,5 +178,13 @@ func TestRequestReply(t *testing.T) {
 		t.Fatalf("failed to send message to tester: %s\n", err.Error())
 	}
 
-	time.Sleep(5000 * time.Millisecond)
+	for {
+		select {
+		case <-tester.closeCh:
+			return
+
+		default:
+			time.Sleep(1000 * time.Millisecond)
+		}
+	}
 }
