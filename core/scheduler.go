@@ -2,7 +2,6 @@ package hermes
 
 import (
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -315,13 +314,8 @@ func (sys *ActorSystem) doRegister(id ActorID, a Receiver) error {
 		return errors.New("invalid_actor_id")
 	}
 
-	fmt.Println("sys::doRegister::locking")
 	sys.mu.Lock()
-
-	defer func() {
-		fmt.Println("sys::doRegister::unlocking")
-		sys.mu.Unlock()
-	}()
+	defer sys.mu.Unlock()
 
 	if _, ok := sys.actors[id]; ok {
 		return errors.New("already_registered")
@@ -365,14 +359,8 @@ func (sys *ActorSystem) reply(msg ActorMessage, reply interface{}) error {
 }
 
 func (sys *ActorSystem) localSend(msg *actorMessage) error {
-	fmt.Printf("sys::localSend: from: %s, to: %s\n", msg.from, msg.to)
-
-	fmt.Println("sys::localSend::locking")
 	sys.mu.Lock()
-	defer func() {
-		fmt.Println("sys::localSend::unlocking")
-		sys.mu.Unlock()
-	}()
+	defer sys.mu.Unlock()
 
 	ctx := sys.actors[msg.to]
 	if ctx == nil {
