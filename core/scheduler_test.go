@@ -19,15 +19,12 @@ type PongActor struct {
 }
 
 func (a *PongActor) receive(ctx *ActorContext, msg ActorMessage) {
-	switch t := msg.Payload().(type) {
+	switch msg.Payload().(type) {
 	case *SendPing:
 		a.onSendPing(ctx, msg)
 
 	case *Ping:
 		a.onPing(ctx, msg)
-
-	default:
-		fmt.Printf("received unkown message: %s\n", t)
 	}
 }
 

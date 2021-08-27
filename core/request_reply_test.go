@@ -17,12 +17,9 @@ type IOTDeviceMeasureResponse struct {
 type IOTDevice struct{}
 
 func (device *IOTDevice) receive(ctx *ActorContext, msg ActorMessage) {
-	switch t := msg.Payload().(type) {
+	switch msg.Payload().(type) {
 	case *IOTDeviceMeasureRequest:
 		ctx.Reply(msg, &IOTDeviceMeasureResponse{value: rand.Float32()})
-
-	default:
-		fmt.Printf("unknown message of type: %s\n", t)
 	}
 }
 
@@ -60,15 +57,12 @@ func newIOTDeviceGroup() *IOTDeviceGroup {
 }
 
 func (grp *IOTDeviceGroup) receive(ctx *ActorContext, msg ActorMessage) {
-	switch t := msg.Payload().(type) {
+	switch msg.Payload().(type) {
 	case *IOTDeviceGroupAddRequest:
 		grp.onAddDevice(ctx, msg)
 
 	case *IOTDeviceGroupMeasureRequest:
 		grp.onMeasure(ctx, msg)
-
-	default:
-		fmt.Printf("unknown message of type: %s\n", t)
 	}
 }
 
