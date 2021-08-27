@@ -15,11 +15,10 @@ type Ping struct{}
 type Pong struct{}
 
 type PongActor struct {
-	id    ActorID
 	count int
 }
 
-func (a *PongActor) Receive(ctx *ActorContext, msg ActorMessage) {
+func (a *PongActor) receive(ctx *ActorContext, msg ActorMessage) {
 	switch t := msg.Payload().(type) {
 	case *SendPing:
 		a.onSendPing(ctx, msg)
@@ -72,26 +71,29 @@ func TestBasic(t *testing.T) {
 }
 
 func TestActorSys(t *testing.T) {
-	sys, err := NewActorSystem()
+	sys, err := NewActorSystem(func(id ActorID) (Receiver, error) {
+		a := &PongActor{}
+		return a.receive, nil
+	})
 	if err != nil {
 		t.Fatalf("new actor system failed with error: %s\n", err.Error())
 	}
 
-	a1 := &PongActor{id: "t1"}
-	a2 := &PongActor{id: "t2"}
+	a1 := ActorID("t1")
+	a2 := ActorID("t2")
 
-	err = sys.Register(a1.id, a1.Receive)
+	err = sys.Register(a1)
 	if err != nil {
 		t.Fatalf("actor registeration failed with error: %s\n", err.Error())
 	}
 
-	err = sys.Register(a2.id, a2.Receive)
+	err = sys.Register(a2)
 	if err != nil {
 		t.Fatalf("actor registeration failed with error: %s\n", err.Error())
 	}
 
 	for i := 0; i < 100; i++ {
-		sys.Send(a1.id, a1.id, &SendPing{to: a2.id})
+		sys.Send(a1, a1, &SendPing{to: a2})
 	}
 
 	time.Sleep(1000 * time.Millisecond)

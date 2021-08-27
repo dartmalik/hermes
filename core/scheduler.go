@@ -199,6 +199,8 @@ type ActorID string
 
 type Receiver func(ctx *ActorContext, msg ActorMessage)
 
+type ReceiverFactory func(id ActorID) (Receiver, error)
+
 type ActorContext struct {
 	id   ActorID
 	sys  *ActorSystem
@@ -223,8 +225,8 @@ func (ctx *ActorContext) SetReceiver(recv Receiver) {
 	ctx.recv = recv
 }
 
-func (ctx *ActorContext) Register(id ActorID, recv Receiver) error {
-	return ctx.sys.Register(id, recv)
+func (ctx *ActorContext) Register(id ActorID) error {
+	return ctx.sys.Register(id)
 }
 
 func (ctx *ActorContext) Send(to ActorID, payload interface{}) error {
@@ -286,9 +288,14 @@ type ActorSystem struct {
 	exec     *Executor
 	actors   map[ActorID]*ActorContext
 	requests map[string]*actorMessage
+	factory  ReceiverFactory
 }
 
-func NewActorSystem() (*ActorSystem, error) {
+func NewActorSystem(factory ReceiverFactory) (*ActorSystem, error) {
+	if factory == nil {
+		return nil, errors.New("invalid_factory")
+	}
+
 	e, err := NewExecutor()
 	if err != nil {
 		return nil, err
@@ -298,11 +305,20 @@ func NewActorSystem() (*ActorSystem, error) {
 		exec:     e,
 		actors:   make(map[ActorID]*ActorContext),
 		requests: make(map[string]*actorMessage),
+		factory:  factory,
 	}, nil
 }
 
-func (sys *ActorSystem) Register(id ActorID, a Receiver) error {
-	err := sys.doRegister(id, a)
+func (sys *ActorSystem) Register(id ActorID) error {
+	r, err := sys.factory(id)
+	if err != nil {
+		return err
+	}
+	if r == nil {
+		return errors.New("invalid_receiver_created")
+	}
+
+	err = sys.doRegister(id, r)
 	if err != nil {
 		return err
 	}

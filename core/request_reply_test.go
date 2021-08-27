@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 )
@@ -25,6 +26,14 @@ func (device *IOTDevice) receive(ctx *ActorContext, msg ActorMessage) {
 	}
 }
 
+func newIOTDevice() *IOTDevice {
+	return &IOTDevice{}
+}
+
+func IOTDeviceID(id string) ActorID {
+	return ActorID(EntityTypeIOTDevice + "/" + id)
+}
+
 type IOTDeviceGroupAddRequest struct {
 	deviceID ActorID
 }
@@ -40,6 +49,10 @@ type IOTDeviceGroupMeasureResponse struct {
 
 type IOTDeviceGroup struct {
 	devices map[ActorID]bool
+}
+
+func IOTDeviceGroupID(id string) ActorID {
+	return ActorID(EntityTypeIOTDeviceGroup + "/" + id)
 }
 
 func newIOTDeviceGroup() *IOTDeviceGroup {
@@ -101,15 +114,29 @@ func (grp *IOTDeviceGroup) onMeasure(ctx *ActorContext, msg ActorMessage) {
 	ctx.Reply(msg, &IOTDeviceGroupMeasureResponse{values: values, err: nil})
 }
 
+const (
+	EntityTypeIOTDevice      = "devices"
+	EntityTypeIOTDeviceGroup = "deviceGroups"
+)
+
+func IOTDeviceFactory(id ActorID) (Receiver, error) {
+	if strings.HasPrefix(string(id), EntityTypeIOTDevice) {
+		return newIOTDevice().receive, nil
+	} else if strings.HasPrefix(string(id), EntityTypeIOTDeviceGroup) {
+		return newIOTDeviceGroup().receive, nil
+	}
+
+	return nil, errors.New("unkown_entity_type")
+}
+
 func TestRequestReply(t *testing.T) {
-	sys, err := NewActorSystem()
+	sys, err := NewActorSystem(IOTDeviceFactory)
 	if err != nil {
 		t.Fatalf("new actor system failed with error: %s\n", err.Error())
 	}
 
-	gid := ActorID("iot-dev-grp")
-	grp := newIOTDeviceGroup()
-	err = sys.Register(gid, grp.receive)
+	gid := IOTDeviceGroupID("iot-dev-grp")
+	err = sys.Register(gid)
 	if err != nil {
 		t.Fatalf("failed to register device group: %s\n", err.Error())
 	}
@@ -129,10 +156,9 @@ func TestRequestReply(t *testing.T) {
 
 func addDevices(sys *ActorSystem, grp ActorID, deviceCount int) error {
 	for di := 0; di < deviceCount; di++ {
-		id := ActorID(fmt.Sprintf("d%d", di))
-		d := &IOTDevice{}
+		id := IOTDeviceID(fmt.Sprintf("d%d", di))
 
-		err := sys.Register(id, d.receive)
+		err := sys.Register(id)
 		if err != nil {
 			return err
 		}
