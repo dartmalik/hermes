@@ -98,3 +98,43 @@ func TestActorSys(t *testing.T) {
 
 	time.Sleep(1000 * time.Millisecond)
 }
+
+func TestUnregister(t *testing.T) {
+	sys, err := NewActorSystem(func(id ActorID) (Receiver, error) {
+		return func(ctx *ActorContext, msg ActorMessage) {
+			switch msg.Payload().(type) {
+			case string:
+				ctx.Reply(msg, msg.Payload().(string))
+			}
+		}, nil
+	})
+	if err != nil {
+		t.Fatalf("failed to created system: %s\n", err.Error())
+	}
+
+	aid := ActorID("t")
+	err = sys.Register(aid)
+	if err != nil {
+		t.Fatalf("failed to register actor: %s\n", err.Error())
+	}
+
+	payload := "hello_world!"
+	res, err := sys.RequestWithTimeout(aid, payload, 100*time.Millisecond)
+	if err != nil {
+		t.Fatalf("request failed: %s\n", err.Error())
+	}
+
+	if res.Payload().(string) != payload {
+		t.Fatalf("invalid message echo'ed")
+	}
+
+	err = sys.Unregister(aid)
+	if err != nil {
+		t.Fatalf("failed to unregister: %s\n", err.Error())
+	}
+
+	_, err = sys.RequestWithTimeout(aid, "hello_world!", 100*time.Millisecond)
+	if err == nil {
+		t.Fatal("request should fail after unregisteration")
+	}
+}

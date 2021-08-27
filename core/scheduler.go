@@ -323,35 +323,31 @@ func (sys *ActorSystem) Register(id ActorID) error {
 		return err
 	}
 
-	//sys.Send("", id, &Registered{})
+	sys.Send("", id, &Registered{})
+
+	return nil
+}
+
+func (sys *ActorSystem) Unregister(id ActorID) error {
+	if id == "" {
+		return errors.New("invalid_id")
+	}
+
+	err := sys.Send("", id, &Unregistered{})
+	if err != nil {
+		return err
+	}
+
+	err = sys.doUnregister(id)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
 
 func (sys *ActorSystem) Send(from ActorID, to ActorID, payload interface{}) error {
 	return sys.localSend(&actorMessage{from: from, to: to, payload: payload})
-}
-
-func (sys *ActorSystem) doRegister(id ActorID, a Receiver) error {
-	if id == "" {
-		return errors.New("invalid_actor_id")
-	}
-
-	sys.mu.Lock()
-	defer sys.mu.Unlock()
-
-	if _, ok := sys.actors[id]; ok {
-		return errors.New("already_registered")
-	}
-
-	ctx, err := newActorContext(id, sys, a)
-	if err != nil {
-		return err
-	}
-
-	sys.actors[id] = ctx
-
-	return nil
 }
 
 func (sys *ActorSystem) Request(to ActorID, request interface{}) chan ActorMessage {
@@ -413,6 +409,42 @@ func (sys *ActorSystem) localSend(msg *actorMessage) error {
 	sys.exec.Submit(string(msg.to), func() {
 		ctx.recv(ctx, msg)
 	})
+
+	return nil
+}
+
+func (sys *ActorSystem) doUnregister(id ActorID) error {
+	sys.mu.Lock()
+	defer sys.mu.Unlock()
+
+	_, ok := sys.actors[id]
+	if !ok {
+		return errors.New("missing_receiver")
+	}
+
+	delete(sys.actors, id)
+
+	return nil
+}
+
+func (sys *ActorSystem) doRegister(id ActorID, a Receiver) error {
+	if id == "" {
+		return errors.New("invalid_actor_id")
+	}
+
+	sys.mu.Lock()
+	defer sys.mu.Unlock()
+
+	if _, ok := sys.actors[id]; ok {
+		return errors.New("already_registered")
+	}
+
+	ctx, err := newActorContext(id, sys, a)
+	if err != nil {
+		return err
+	}
+
+	sys.actors[id] = ctx
 
 	return nil
 }
