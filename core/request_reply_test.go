@@ -74,21 +74,28 @@ func (grp *IOTDeviceGroup) onAddDevice(ctx *ActorContext, msg ActorMessage) {
 
 func (grp *IOTDeviceGroup) onMeasure(ctx *ActorContext, msg ActorMessage) {
 	values := make([]float32, 0, len(grp.devices))
+	reqChs := make([]chan ActorMessage, 0, len(grp.devices))
 
 	for id := range grp.devices {
-		reply, err := ctx.RequestWithTimeout(id, &IOTDeviceMeasureRequest{}, 100*time.Millisecond)
-		if err != nil {
-			ctx.Reply(msg, &IOTDeviceGroupMeasureResponse{err: err})
+		reqCh := ctx.Request(id, &IOTDeviceMeasureRequest{})
+		reqChs = append(reqChs, reqCh)
+	}
+
+	for _, reqCh := range reqChs {
+		select {
+		case reply := <-reqCh:
+			dmr, ok := reply.Payload().(*IOTDeviceMeasureResponse)
+			if !ok {
+				ctx.Reply(msg, &IOTDeviceGroupMeasureResponse{err: errors.New("invalid_device_reply")})
+				return
+			}
+
+			values = append(values, dmr.value)
+
+		case <-time.After(100 * time.Millisecond):
+			ctx.Reply(msg, &IOTDeviceGroupMeasureResponse{err: errors.New("request_timeout")})
 			return
 		}
-
-		dmr, ok := reply.Payload().(*IOTDeviceMeasureResponse)
-		if !ok {
-			ctx.Reply(msg, &IOTDeviceGroupMeasureResponse{err: errors.New("invalid_device_reply")})
-			return
-		}
-
-		values = append(values, dmr.value)
 	}
 
 	ctx.Reply(msg, &IOTDeviceGroupMeasureResponse{values: values, err: nil})
