@@ -232,11 +232,11 @@ func (ctx *ActorContext) Send(to ActorID, payload interface{}) error {
 }
 
 func (ctx *ActorContext) Request(to ActorID, request interface{}) chan ActorMessage {
-	return ctx.sys.request(ctx.id, to, request)
+	return ctx.sys.Request(to, request)
 }
 
 func (ctx *ActorContext) RequestWithTimeout(to ActorID, request interface{}, timeout time.Duration) (ActorMessage, error) {
-	return ctx.sys.requestWithTimeout(ctx.id, to, request, timeout)
+	return ctx.sys.RequestWithTimeout(to, request, timeout)
 }
 
 func (ctx *ActorContext) Reply(msg ActorMessage, reply interface{}) error {
@@ -274,6 +274,13 @@ func (m *actorMessage) Payload() interface{} {
 	return m.payload
 }
 
+/*
+	- delivers messages from senders to receivers
+	- a request message is delivered to a receiver
+	- a response message is delivered to the system (which notifies using the request channel)
+	- the 'to' field is required for send a message and a request
+	- the 'from' field is required when sending a reply
+*/
 type ActorSystem struct {
 	mu       sync.Mutex
 	exec     *Executor
@@ -331,17 +338,17 @@ func (sys *ActorSystem) doRegister(id ActorID, a Receiver) error {
 	return nil
 }
 
-func (sys *ActorSystem) request(from ActorID, to ActorID, request interface{}) chan ActorMessage {
-	m := &actorMessage{from: from, to: to, corID: uuid.NewV4().String(), payload: request, replyCh: make(chan ActorMessage, 1)}
+func (sys *ActorSystem) Request(to ActorID, request interface{}) chan ActorMessage {
+	m := &actorMessage{to: to, corID: uuid.NewV4().String(), payload: request, replyCh: make(chan ActorMessage, 1)}
 
 	sys.localSend(m)
 
 	return m.replyCh
 }
 
-func (sys *ActorSystem) requestWithTimeout(from ActorID, to ActorID, request interface{}, timeout time.Duration) (ActorMessage, error) {
+func (sys *ActorSystem) RequestWithTimeout(to ActorID, request interface{}, timeout time.Duration) (ActorMessage, error) {
 	select {
-	case reply := <-sys.request(from, to, request):
+	case reply := <-sys.Request(to, request):
 		return reply, nil
 
 	case <-time.After(timeout):
@@ -355,20 +362,15 @@ func (sys *ActorSystem) reply(msg ActorMessage, reply interface{}) error {
 		return errors.New("invalid_message")
 	}
 
-	return sys.localSend(&actorMessage{from: am.to, to: am.from, corID: am.corID, payload: reply})
+	return sys.localSend(&actorMessage{from: am.to, corID: am.corID, payload: reply})
 }
 
 func (sys *ActorSystem) localSend(msg *actorMessage) error {
 	sys.mu.Lock()
 	defer sys.mu.Unlock()
 
-	ctx := sys.actors[msg.to]
-	if ctx == nil {
-		return errors.New("unregistered_actor")
-	}
-
 	if msg.corID != "" {
-		if msg.isRequest() && msg.from != "" {
+		if msg.isRequest() /*&& msg.from != ""*/ {
 			if _, ok := sys.requests[msg.corID]; ok {
 				return errors.New("request_already_exists")
 			}
@@ -385,6 +387,11 @@ func (sys *ActorSystem) localSend(msg *actorMessage) error {
 				return errors.New("invalid_reply_correlation-id")
 			}
 		}
+	}
+
+	ctx := sys.actors[msg.to]
+	if ctx == nil {
+		return errors.New("unregistered_actor")
 	}
 
 	sys.exec.Submit(string(msg.to), func() {
