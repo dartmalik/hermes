@@ -195,19 +195,19 @@ func (e *Executor) removeIdleWorkers() {
 	}
 }
 
-type ActorID string
+type ReceiverID string
 
-type Receiver func(ctx *ActorContext, msg Message)
+type Receiver func(ctx *Context, msg Message)
 
-type ReceiverFactory func(id ActorID) (Receiver, error)
+type ReceiverFactory func(id ReceiverID) (Receiver, error)
 
-type ActorContext struct {
-	id   ActorID
-	sys  *ActorSystem
+type Context struct {
+	id   ReceiverID
+	sys  *Hermes
 	recv Receiver
 }
 
-func newActorContext(id ActorID, sys *ActorSystem, recv Receiver) (*ActorContext, error) {
+func newContext(id ReceiverID, sys *Hermes, recv Receiver) (*Context, error) {
 	if id == "" {
 		return nil, errors.New("invalid_actor_id")
 	}
@@ -218,30 +218,30 @@ func newActorContext(id ActorID, sys *ActorSystem, recv Receiver) (*ActorContext
 		return nil, errors.New("invalid_receiver")
 	}
 
-	return &ActorContext{id: id, sys: sys, recv: recv}, nil
+	return &Context{id: id, sys: sys, recv: recv}, nil
 }
 
-func (ctx *ActorContext) SetReceiver(recv Receiver) {
+func (ctx *Context) SetReceiver(recv Receiver) {
 	ctx.recv = recv
 }
 
-func (ctx *ActorContext) Register(id ActorID) error {
+func (ctx *Context) Register(id ReceiverID) error {
 	return ctx.sys.Register(id)
 }
 
-func (ctx *ActorContext) Send(to ActorID, payload interface{}) error {
+func (ctx *Context) Send(to ReceiverID, payload interface{}) error {
 	return ctx.sys.Send(ctx.id, to, payload)
 }
 
-func (ctx *ActorContext) Request(to ActorID, request interface{}) chan Message {
+func (ctx *Context) Request(to ReceiverID, request interface{}) chan Message {
 	return ctx.sys.Request(to, request)
 }
 
-func (ctx *ActorContext) RequestWithTimeout(to ActorID, request interface{}, timeout time.Duration) (Message, error) {
+func (ctx *Context) RequestWithTimeout(to ReceiverID, request interface{}, timeout time.Duration) (Message, error) {
 	return ctx.sys.RequestWithTimeout(to, request, timeout)
 }
 
-func (ctx *ActorContext) Reply(msg Message, reply interface{}) error {
+func (ctx *Context) Reply(msg Message, reply interface{}) error {
 	im := msg.(*message)
 	if im.to != ctx.id {
 		return errors.New("not_the_recipient")
@@ -259,8 +259,8 @@ type Message interface {
 }
 
 type message struct {
-	from    ActorID
-	to      ActorID
+	from    ReceiverID
+	to      ReceiverID
 	corID   string
 	payload interface{}
 	replyCh chan Message
@@ -281,15 +281,15 @@ func (m *message) Payload() interface{} {
 	- the 'to' field is required for send a message and a request
 	- the 'from' field is required when sending a reply
 */
-type ActorSystem struct {
+type Hermes struct {
 	mu       sync.Mutex
 	exec     *Executor
-	actors   map[ActorID]*ActorContext
+	contexts map[ReceiverID]*Context
 	requests map[string]*message
 	factory  ReceiverFactory
 }
 
-func NewActorSystem(factory ReceiverFactory) (*ActorSystem, error) {
+func New(factory ReceiverFactory) (*Hermes, error) {
 	if factory == nil {
 		return nil, errors.New("invalid_factory")
 	}
@@ -299,16 +299,16 @@ func NewActorSystem(factory ReceiverFactory) (*ActorSystem, error) {
 		return nil, err
 	}
 
-	return &ActorSystem{
+	return &Hermes{
 		exec:     e,
-		actors:   make(map[ActorID]*ActorContext),
+		contexts: make(map[ReceiverID]*Context),
 		requests: make(map[string]*message),
 		factory:  factory,
 	}, nil
 }
 
-func (sys *ActorSystem) Register(id ActorID) error {
-	r, err := sys.factory(id)
+func (net *Hermes) Register(id ReceiverID) error {
+	r, err := net.factory(id)
 	if err != nil {
 		return err
 	}
@@ -316,27 +316,27 @@ func (sys *ActorSystem) Register(id ActorID) error {
 		return errors.New("invalid_receiver_created")
 	}
 
-	err = sys.doRegister(id, r)
+	err = net.doRegister(id, r)
 	if err != nil {
 		return err
 	}
 
-	sys.Send("", id, &Registered{})
+	net.Send("", id, &Registered{})
 
 	return nil
 }
 
-func (sys *ActorSystem) Unregister(id ActorID) error {
+func (net *Hermes) Unregister(id ReceiverID) error {
 	if id == "" {
 		return errors.New("invalid_id")
 	}
 
-	err := sys.Send("", id, &Unregistered{})
+	err := net.Send("", id, &Unregistered{})
 	if err != nil {
 		return err
 	}
 
-	err = sys.doUnregister(id)
+	err = net.doUnregister(id)
 	if err != nil {
 		return err
 	}
@@ -344,21 +344,21 @@ func (sys *ActorSystem) Unregister(id ActorID) error {
 	return nil
 }
 
-func (sys *ActorSystem) Send(from ActorID, to ActorID, payload interface{}) error {
-	return sys.localSend(&message{from: from, to: to, payload: payload})
+func (net *Hermes) Send(from ReceiverID, to ReceiverID, payload interface{}) error {
+	return net.localSend(&message{from: from, to: to, payload: payload})
 }
 
-func (sys *ActorSystem) Request(to ActorID, request interface{}) chan Message {
+func (net *Hermes) Request(to ReceiverID, request interface{}) chan Message {
 	m := &message{to: to, corID: uuid.NewV4().String(), payload: request, replyCh: make(chan Message, 1)}
 
-	sys.localSend(m)
+	net.localSend(m)
 
 	return m.replyCh
 }
 
-func (sys *ActorSystem) RequestWithTimeout(to ActorID, request interface{}, timeout time.Duration) (Message, error) {
+func (net *Hermes) RequestWithTimeout(to ReceiverID, request interface{}, timeout time.Duration) (Message, error) {
 	select {
-	case reply := <-sys.Request(to, request):
+	case reply := <-net.Request(to, request):
 		return reply, nil
 
 	case <-time.After(timeout):
@@ -366,31 +366,31 @@ func (sys *ActorSystem) RequestWithTimeout(to ActorID, request interface{}, time
 	}
 }
 
-func (sys *ActorSystem) reply(msg Message, reply interface{}) error {
+func (net *Hermes) reply(msg Message, reply interface{}) error {
 	im, ok := msg.(*message)
 	if !ok {
 		return errors.New("invalid_message")
 	}
 
-	return sys.localSend(&message{from: im.to, corID: im.corID, payload: reply})
+	return net.localSend(&message{from: im.to, corID: im.corID, payload: reply})
 }
 
-func (sys *ActorSystem) localSend(msg *message) error {
-	sys.mu.Lock()
-	defer sys.mu.Unlock()
+func (net *Hermes) localSend(msg *message) error {
+	net.mu.Lock()
+	defer net.mu.Unlock()
 
 	if msg.corID != "" {
 		if msg.isRequest() /*&& msg.from != ""*/ {
-			if _, ok := sys.requests[msg.corID]; ok {
+			if _, ok := net.requests[msg.corID]; ok {
 				return errors.New("request_already_exists")
 			}
 
-			sys.requests[msg.corID] = msg
+			net.requests[msg.corID] = msg
 		} else {
-			r, ok := sys.requests[msg.corID]
+			r, ok := net.requests[msg.corID]
 			if ok {
 				r.replyCh <- msg
-				delete(sys.requests, msg.corID)
+				delete(net.requests, msg.corID)
 
 				return nil
 			} else {
@@ -399,50 +399,50 @@ func (sys *ActorSystem) localSend(msg *message) error {
 		}
 	}
 
-	ctx := sys.actors[msg.to]
+	ctx := net.contexts[msg.to]
 	if ctx == nil {
 		return errors.New("unregistered_actor")
 	}
 
-	sys.exec.Submit(string(msg.to), func() {
+	net.exec.Submit(string(msg.to), func() {
 		ctx.recv(ctx, msg)
 	})
 
 	return nil
 }
 
-func (sys *ActorSystem) doUnregister(id ActorID) error {
-	sys.mu.Lock()
-	defer sys.mu.Unlock()
+func (net *Hermes) doUnregister(id ReceiverID) error {
+	net.mu.Lock()
+	defer net.mu.Unlock()
 
-	_, ok := sys.actors[id]
+	_, ok := net.contexts[id]
 	if !ok {
 		return errors.New("missing_receiver")
 	}
 
-	delete(sys.actors, id)
+	delete(net.contexts, id)
 
 	return nil
 }
 
-func (sys *ActorSystem) doRegister(id ActorID, a Receiver) error {
+func (net *Hermes) doRegister(id ReceiverID, a Receiver) error {
 	if id == "" {
 		return errors.New("invalid_actor_id")
 	}
 
-	sys.mu.Lock()
-	defer sys.mu.Unlock()
+	net.mu.Lock()
+	defer net.mu.Unlock()
 
-	if _, ok := sys.actors[id]; ok {
+	if _, ok := net.contexts[id]; ok {
 		return errors.New("already_registered")
 	}
 
-	ctx, err := newActorContext(id, sys, a)
+	ctx, err := newContext(id, net, a)
 	if err != nil {
 		return err
 	}
 
-	sys.actors[id] = ctx
+	net.contexts[id] = ctx
 
 	return nil
 }

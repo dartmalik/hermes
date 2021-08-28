@@ -16,7 +16,7 @@ type IOTDeviceMeasureResponse struct {
 
 type IOTDevice struct{}
 
-func (device *IOTDevice) receive(ctx *ActorContext, msg Message) {
+func (device *IOTDevice) receive(ctx *Context, msg Message) {
 	switch msg.Payload().(type) {
 	case *IOTDeviceMeasureRequest:
 		ctx.Reply(msg, &IOTDeviceMeasureResponse{value: rand.Float32()})
@@ -27,12 +27,12 @@ func newIOTDevice() *IOTDevice {
 	return &IOTDevice{}
 }
 
-func IOTDeviceID(id string) ActorID {
-	return ActorID(EntityTypeIOTDevice + "/" + id)
+func IOTDeviceID(id string) ReceiverID {
+	return ReceiverID(EntityTypeIOTDevice + "/" + id)
 }
 
 type IOTDeviceGroupAddRequest struct {
-	deviceID ActorID
+	deviceID ReceiverID
 }
 type IOTDeviceGroupAddResponse struct {
 	err error
@@ -45,18 +45,18 @@ type IOTDeviceGroupMeasureResponse struct {
 }
 
 type IOTDeviceGroup struct {
-	devices map[ActorID]bool
+	devices map[ReceiverID]bool
 }
 
-func IOTDeviceGroupID(id string) ActorID {
-	return ActorID(EntityTypeIOTDeviceGroup + "/" + id)
+func IOTDeviceGroupID(id string) ReceiverID {
+	return ReceiverID(EntityTypeIOTDeviceGroup + "/" + id)
 }
 
 func newIOTDeviceGroup() *IOTDeviceGroup {
-	return &IOTDeviceGroup{devices: make(map[ActorID]bool)}
+	return &IOTDeviceGroup{devices: make(map[ReceiverID]bool)}
 }
 
-func (grp *IOTDeviceGroup) receive(ctx *ActorContext, msg Message) {
+func (grp *IOTDeviceGroup) receive(ctx *Context, msg Message) {
 	switch msg.Payload().(type) {
 	case *IOTDeviceGroupAddRequest:
 		grp.onAddDevice(ctx, msg)
@@ -66,7 +66,7 @@ func (grp *IOTDeviceGroup) receive(ctx *ActorContext, msg Message) {
 	}
 }
 
-func (grp *IOTDeviceGroup) onAddDevice(ctx *ActorContext, msg Message) {
+func (grp *IOTDeviceGroup) onAddDevice(ctx *Context, msg Message) {
 	id := msg.Payload().(*IOTDeviceGroupAddRequest).deviceID
 
 	if id == "" {
@@ -79,7 +79,7 @@ func (grp *IOTDeviceGroup) onAddDevice(ctx *ActorContext, msg Message) {
 	ctx.Reply(msg, &IOTDeviceGroupAddResponse{})
 }
 
-func (grp *IOTDeviceGroup) onMeasure(ctx *ActorContext, msg Message) {
+func (grp *IOTDeviceGroup) onMeasure(ctx *Context, msg Message) {
 	values := make([]float32, 0, len(grp.devices))
 	reqChs := make([]chan Message, 0, len(grp.devices))
 
@@ -113,7 +113,7 @@ const (
 	EntityTypeIOTDeviceGroup = "deviceGroups"
 )
 
-func IOTDeviceFactory(id ActorID) (Receiver, error) {
+func IOTDeviceFactory(id ReceiverID) (Receiver, error) {
 	if strings.HasPrefix(string(id), EntityTypeIOTDevice) {
 		return newIOTDevice().receive, nil
 	} else if strings.HasPrefix(string(id), EntityTypeIOTDeviceGroup) {
@@ -124,40 +124,40 @@ func IOTDeviceFactory(id ActorID) (Receiver, error) {
 }
 
 func TestRequestReply(t *testing.T) {
-	sys, err := NewActorSystem(IOTDeviceFactory)
+	net, err := New(IOTDeviceFactory)
 	if err != nil {
 		t.Fatalf("new actor system failed with error: %s\n", err.Error())
 	}
 
 	gid := IOTDeviceGroupID("iot-dev-grp")
-	err = sys.Register(gid)
+	err = net.Register(gid)
 	if err != nil {
 		t.Fatalf("failed to register device group: %s\n", err.Error())
 	}
 
 	deviceCount := 10
 
-	err = addDevices(sys, gid, deviceCount)
+	err = addDevices(net, gid, deviceCount)
 	if err != nil {
 		t.Fatalf("failed to add devices: %s\n", err.Error())
 	}
 
-	err = measure(sys, gid, deviceCount)
+	err = measure(net, gid, deviceCount)
 	if err != nil {
 		t.Fatalf("failed to measure devices: %s\n", err.Error())
 	}
 }
 
-func addDevices(sys *ActorSystem, grp ActorID, deviceCount int) error {
+func addDevices(net *Hermes, grp ReceiverID, deviceCount int) error {
 	for di := 0; di < deviceCount; di++ {
 		id := IOTDeviceID(fmt.Sprintf("d%d", di))
 
-		err := sys.Register(id)
+		err := net.Register(id)
 		if err != nil {
 			return err
 		}
 
-		m, err := sys.RequestWithTimeout(grp, &IOTDeviceGroupAddRequest{deviceID: id}, 100*time.Millisecond)
+		m, err := net.RequestWithTimeout(grp, &IOTDeviceGroupAddRequest{deviceID: id}, 100*time.Millisecond)
 		if err != nil {
 			return err
 		}
@@ -171,8 +171,8 @@ func addDevices(sys *ActorSystem, grp ActorID, deviceCount int) error {
 	return nil
 }
 
-func measure(sys *ActorSystem, grp ActorID, deviceCount int) error {
-	res, err := sys.RequestWithTimeout(grp, &IOTDeviceGroupMeasureRequest{}, 1000*time.Millisecond)
+func measure(net *Hermes, grp ReceiverID, deviceCount int) error {
+	res, err := net.RequestWithTimeout(grp, &IOTDeviceGroupMeasureRequest{}, 1000*time.Millisecond)
 	if err != nil {
 		return err
 	}
