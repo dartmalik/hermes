@@ -203,22 +203,22 @@ type ReceiverFactory func(id ReceiverID) (Receiver, error)
 
 type Context struct {
 	id   ReceiverID
-	sys  *Hermes
+	net  *Hermes
 	recv Receiver
 }
 
-func newContext(id ReceiverID, sys *Hermes, recv Receiver) (*Context, error) {
+func newContext(id ReceiverID, net *Hermes, recv Receiver) (*Context, error) {
 	if id == "" {
 		return nil, errors.New("invalid_actor_id")
 	}
-	if sys == nil {
+	if net == nil {
 		return nil, errors.New("invalid_system")
 	}
 	if recv == nil {
 		return nil, errors.New("invalid_receiver")
 	}
 
-	return &Context{id: id, sys: sys, recv: recv}, nil
+	return &Context{id: id, net: net, recv: recv}, nil
 }
 
 func (ctx *Context) SetReceiver(recv Receiver) {
@@ -226,19 +226,19 @@ func (ctx *Context) SetReceiver(recv Receiver) {
 }
 
 func (ctx *Context) Register(id ReceiverID) error {
-	return ctx.sys.Register(id)
+	return ctx.net.Register(id)
 }
 
 func (ctx *Context) Send(to ReceiverID, payload interface{}) error {
-	return ctx.sys.Send(ctx.id, to, payload)
+	return ctx.net.Send(ctx.id, to, payload)
 }
 
 func (ctx *Context) Request(to ReceiverID, request interface{}) chan Message {
-	return ctx.sys.Request(to, request)
+	return ctx.net.Request(to, request)
 }
 
 func (ctx *Context) RequestWithTimeout(to ReceiverID, request interface{}, timeout time.Duration) (Message, error) {
-	return ctx.sys.RequestWithTimeout(to, request, timeout)
+	return ctx.net.RequestWithTimeout(to, request, timeout)
 }
 
 func (ctx *Context) Reply(msg Message, reply interface{}) error {
@@ -247,7 +247,7 @@ func (ctx *Context) Reply(msg Message, reply interface{}) error {
 		return errors.New("not_the_recipient")
 	}
 
-	return ctx.sys.reply(msg, reply)
+	return ctx.net.reply(msg, reply)
 }
 
 type Registered struct{}
