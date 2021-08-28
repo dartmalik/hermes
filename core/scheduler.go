@@ -11,7 +11,7 @@ import (
 /*
 	goals:
 	- (no-locks, no-async) single threaded, synchronous execution of app code
-	- (single-source-of-exec) each actor can linearize commands by executing one command at a time
+	- (single-source-of-exec) each receiver can linearize commands by executing one command at a time
 	- (location-transparency) scalability by spreading out state to a cluster
 */
 var ErrIllegalState = errors.New("no_capacity")
@@ -209,7 +209,7 @@ type Context struct {
 
 func newContext(id ReceiverID, net *Hermes, recv Receiver) (*Context, error) {
 	if id == "" {
-		return nil, errors.New("invalid_actor_id")
+		return nil, errors.New("invalid_id")
 	}
 	if net == nil {
 		return nil, errors.New("invalid_system")
@@ -316,7 +316,7 @@ func (net *Hermes) Join(id ReceiverID) error {
 		return errors.New("invalid_receiver_created")
 	}
 
-	err = net.doRegister(id, r)
+	err = net.doJoin(id, r)
 	if err != nil {
 		return err
 	}
@@ -336,7 +336,7 @@ func (net *Hermes) Leave(id ReceiverID) error {
 		return err
 	}
 
-	err = net.doUnregister(id)
+	err = net.doLeave(id)
 	if err != nil {
 		return err
 	}
@@ -401,7 +401,7 @@ func (net *Hermes) localSend(msg *message) error {
 
 	ctx := net.contexts[msg.to]
 	if ctx == nil {
-		return errors.New("unregistered_actor")
+		return errors.New("unknown_receiver")
 	}
 
 	net.exec.Submit(string(msg.to), func() {
@@ -411,30 +411,16 @@ func (net *Hermes) localSend(msg *message) error {
 	return nil
 }
 
-func (net *Hermes) doUnregister(id ReceiverID) error {
-	net.mu.Lock()
-	defer net.mu.Unlock()
-
-	_, ok := net.contexts[id]
-	if !ok {
-		return errors.New("missing_receiver")
-	}
-
-	delete(net.contexts, id)
-
-	return nil
-}
-
-func (net *Hermes) doRegister(id ReceiverID, a Receiver) error {
+func (net *Hermes) doJoin(id ReceiverID, a Receiver) error {
 	if id == "" {
-		return errors.New("invalid_actor_id")
+		return errors.New("invalid_id")
 	}
 
 	net.mu.Lock()
 	defer net.mu.Unlock()
 
 	if _, ok := net.contexts[id]; ok {
-		return errors.New("already_registered")
+		return errors.New("already_joined")
 	}
 
 	ctx, err := newContext(id, net, a)
@@ -443,6 +429,20 @@ func (net *Hermes) doRegister(id ReceiverID, a Receiver) error {
 	}
 
 	net.contexts[id] = ctx
+
+	return nil
+}
+
+func (net *Hermes) doLeave(id ReceiverID) error {
+	net.mu.Lock()
+	defer net.mu.Unlock()
+
+	_, ok := net.contexts[id]
+	if !ok {
+		return errors.New("unknown_receiver")
+	}
+
+	delete(net.contexts, id)
 
 	return nil
 }
