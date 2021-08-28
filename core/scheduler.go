@@ -197,7 +197,7 @@ func (e *Executor) removeIdleWorkers() {
 
 type ActorID string
 
-type Receiver func(ctx *ActorContext, msg ActorMessage)
+type Receiver func(ctx *ActorContext, msg Message)
 
 type ReceiverFactory func(id ActorID) (Receiver, error)
 
@@ -233,17 +233,17 @@ func (ctx *ActorContext) Send(to ActorID, payload interface{}) error {
 	return ctx.sys.Send(ctx.id, to, payload)
 }
 
-func (ctx *ActorContext) Request(to ActorID, request interface{}) chan ActorMessage {
+func (ctx *ActorContext) Request(to ActorID, request interface{}) chan Message {
 	return ctx.sys.Request(to, request)
 }
 
-func (ctx *ActorContext) RequestWithTimeout(to ActorID, request interface{}, timeout time.Duration) (ActorMessage, error) {
+func (ctx *ActorContext) RequestWithTimeout(to ActorID, request interface{}, timeout time.Duration) (Message, error) {
 	return ctx.sys.RequestWithTimeout(to, request, timeout)
 }
 
-func (ctx *ActorContext) Reply(msg ActorMessage, reply interface{}) error {
-	am := msg.(*actorMessage)
-	if am.to != ctx.id {
+func (ctx *ActorContext) Reply(msg Message, reply interface{}) error {
+	im := msg.(*message)
+	if im.to != ctx.id {
 		return errors.New("not_the_recipient")
 	}
 
@@ -252,27 +252,25 @@ func (ctx *ActorContext) Reply(msg ActorMessage, reply interface{}) error {
 
 type Registered struct{}
 
-type Unregistering struct{}
-
 type Unregistered struct{}
 
-type ActorMessage interface {
+type Message interface {
 	Payload() interface{}
 }
 
-type actorMessage struct {
+type message struct {
 	from    ActorID
 	to      ActorID
 	corID   string
 	payload interface{}
-	replyCh chan ActorMessage
+	replyCh chan Message
 }
 
-func (m *actorMessage) isRequest() bool {
+func (m *message) isRequest() bool {
 	return m.replyCh != nil
 }
 
-func (m *actorMessage) Payload() interface{} {
+func (m *message) Payload() interface{} {
 	return m.payload
 }
 
@@ -287,7 +285,7 @@ type ActorSystem struct {
 	mu       sync.Mutex
 	exec     *Executor
 	actors   map[ActorID]*ActorContext
-	requests map[string]*actorMessage
+	requests map[string]*message
 	factory  ReceiverFactory
 }
 
@@ -304,7 +302,7 @@ func NewActorSystem(factory ReceiverFactory) (*ActorSystem, error) {
 	return &ActorSystem{
 		exec:     e,
 		actors:   make(map[ActorID]*ActorContext),
-		requests: make(map[string]*actorMessage),
+		requests: make(map[string]*message),
 		factory:  factory,
 	}, nil
 }
@@ -347,18 +345,18 @@ func (sys *ActorSystem) Unregister(id ActorID) error {
 }
 
 func (sys *ActorSystem) Send(from ActorID, to ActorID, payload interface{}) error {
-	return sys.localSend(&actorMessage{from: from, to: to, payload: payload})
+	return sys.localSend(&message{from: from, to: to, payload: payload})
 }
 
-func (sys *ActorSystem) Request(to ActorID, request interface{}) chan ActorMessage {
-	m := &actorMessage{to: to, corID: uuid.NewV4().String(), payload: request, replyCh: make(chan ActorMessage, 1)}
+func (sys *ActorSystem) Request(to ActorID, request interface{}) chan Message {
+	m := &message{to: to, corID: uuid.NewV4().String(), payload: request, replyCh: make(chan Message, 1)}
 
 	sys.localSend(m)
 
 	return m.replyCh
 }
 
-func (sys *ActorSystem) RequestWithTimeout(to ActorID, request interface{}, timeout time.Duration) (ActorMessage, error) {
+func (sys *ActorSystem) RequestWithTimeout(to ActorID, request interface{}, timeout time.Duration) (Message, error) {
 	select {
 	case reply := <-sys.Request(to, request):
 		return reply, nil
@@ -368,16 +366,16 @@ func (sys *ActorSystem) RequestWithTimeout(to ActorID, request interface{}, time
 	}
 }
 
-func (sys *ActorSystem) reply(msg ActorMessage, reply interface{}) error {
-	am, ok := msg.(*actorMessage)
+func (sys *ActorSystem) reply(msg Message, reply interface{}) error {
+	im, ok := msg.(*message)
 	if !ok {
 		return errors.New("invalid_message")
 	}
 
-	return sys.localSend(&actorMessage{from: am.to, corID: am.corID, payload: reply})
+	return sys.localSend(&message{from: im.to, corID: im.corID, payload: reply})
 }
 
-func (sys *ActorSystem) localSend(msg *actorMessage) error {
+func (sys *ActorSystem) localSend(msg *message) error {
 	sys.mu.Lock()
 	defer sys.mu.Unlock()
 

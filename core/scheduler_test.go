@@ -18,7 +18,7 @@ type PongActor struct {
 	count int
 }
 
-func (a *PongActor) receive(ctx *ActorContext, msg ActorMessage) {
+func (a *PongActor) receive(ctx *ActorContext, msg Message) {
 	switch msg.Payload().(type) {
 	case *SendPing:
 		a.onSendPing(ctx, msg)
@@ -28,7 +28,7 @@ func (a *PongActor) receive(ctx *ActorContext, msg ActorMessage) {
 	}
 }
 
-func (a *PongActor) onSendPing(ctx *ActorContext, msg ActorMessage) {
+func (a *PongActor) onSendPing(ctx *ActorContext, msg Message) {
 	sp := msg.Payload().(*SendPing)
 
 	reply, err := ctx.RequestWithTimeout(sp.to, &Ping{}, 1500*time.Millisecond)
@@ -42,7 +42,7 @@ func (a *PongActor) onSendPing(ctx *ActorContext, msg ActorMessage) {
 	}
 }
 
-func (a *PongActor) onPing(ctx *ActorContext, msg ActorMessage) {
+func (a *PongActor) onPing(ctx *ActorContext, msg Message) {
 	a.count++
 
 	fmt.Printf("received ping: %d\n", a.count)
@@ -98,7 +98,7 @@ func TestActorSys(t *testing.T) {
 
 func TestUnregister(t *testing.T) {
 	sys, err := NewActorSystem(func(id ActorID) (Receiver, error) {
-		return func(ctx *ActorContext, msg ActorMessage) {
+		return func(ctx *ActorContext, msg Message) {
 			switch msg.Payload().(type) {
 			case string:
 				ctx.Reply(msg, msg.Payload().(string))
