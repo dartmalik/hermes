@@ -96,6 +96,43 @@ func TestMessagePassing(t *testing.T) {
 	time.Sleep(1000 * time.Millisecond)
 }
 
+func BenchmarkMessagePassing(b *testing.B) {
+	net, err := New(func(id ReceiverID) (Receiver, error) {
+		a := &PongActor{}
+		return a.receive, nil
+	})
+	if err != nil {
+		b.Fatalf("new actor system failed with error: %s\n", err.Error())
+	}
+
+	fmt.Printf("running test with runs: %d\n", b.N)
+	for ri := 0; ri < b.N; ri++ {
+		passMessage(b, net, ri)
+	}
+}
+
+func passMessage(b *testing.B, net *Hermes, run int) {
+	a1 := ReceiverID(fmt.Sprintf("t1-%d", run))
+	a2 := ReceiverID(fmt.Sprintf("t2-%d", run))
+
+	err := net.Join(a1)
+	if err != nil {
+		b.Fatalf("actor registeration failed with error: %s\n", err.Error())
+	}
+
+	err = net.Join(a2)
+	if err != nil {
+		b.Fatalf("actor registeration failed with error: %s\n", err.Error())
+	}
+
+	for i := 0; i < 1; i++ {
+		net.Send(a1, a1, &SendPing{to: a2})
+	}
+
+	//net.Leave(a1)
+	//net.Leave(a2)
+}
+
 func TestReceiverMembership(t *testing.T) {
 	net, err := New(func(id ReceiverID) (Receiver, error) {
 		return func(ctx *Context, msg Message) {
