@@ -79,12 +79,12 @@ func TestMessagePassing(t *testing.T) {
 	a1 := ReceiverID("t1")
 	a2 := ReceiverID("t2")
 
-	err = net.Register(a1)
+	err = net.Join(a1)
 	if err != nil {
 		t.Fatalf("actor registeration failed with error: %s\n", err.Error())
 	}
 
-	err = net.Register(a2)
+	err = net.Join(a2)
 	if err != nil {
 		t.Fatalf("actor registeration failed with error: %s\n", err.Error())
 	}
@@ -96,7 +96,7 @@ func TestMessagePassing(t *testing.T) {
 	time.Sleep(1000 * time.Millisecond)
 }
 
-func TestUnregister(t *testing.T) {
+func TestReceiverMembership(t *testing.T) {
 	net, err := New(func(id ReceiverID) (Receiver, error) {
 		return func(ctx *Context, msg Message) {
 			switch msg.Payload().(type) {
@@ -110,7 +110,7 @@ func TestUnregister(t *testing.T) {
 	}
 
 	aid := ReceiverID("t")
-	err = net.Register(aid)
+	err = net.Join(aid)
 	if err != nil {
 		t.Fatalf("failed to register actor: %s\n", err.Error())
 	}
@@ -125,7 +125,7 @@ func TestUnregister(t *testing.T) {
 		t.Fatalf("invalid message echo'ed")
 	}
 
-	err = net.Unregister(aid)
+	err = net.Leave(aid)
 	if err != nil {
 		t.Fatalf("failed to unregister: %s\n", err.Error())
 	}

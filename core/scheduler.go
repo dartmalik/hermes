@@ -225,8 +225,8 @@ func (ctx *Context) SetReceiver(recv Receiver) {
 	ctx.recv = recv
 }
 
-func (ctx *Context) Register(id ReceiverID) error {
-	return ctx.net.Register(id)
+func (ctx *Context) Join(id ReceiverID) error {
+	return ctx.net.Join(id)
 }
 
 func (ctx *Context) Send(to ReceiverID, payload interface{}) error {
@@ -250,9 +250,9 @@ func (ctx *Context) Reply(msg Message, reply interface{}) error {
 	return ctx.net.reply(msg, reply)
 }
 
-type Registered struct{}
+type Joined struct{}
 
-type Unregistered struct{}
+type Left struct{}
 
 type Message interface {
 	Payload() interface{}
@@ -307,7 +307,7 @@ func New(factory ReceiverFactory) (*Hermes, error) {
 	}, nil
 }
 
-func (net *Hermes) Register(id ReceiverID) error {
+func (net *Hermes) Join(id ReceiverID) error {
 	r, err := net.factory(id)
 	if err != nil {
 		return err
@@ -321,17 +321,17 @@ func (net *Hermes) Register(id ReceiverID) error {
 		return err
 	}
 
-	net.Send("", id, &Registered{})
+	net.Send("", id, &Joined{})
 
 	return nil
 }
 
-func (net *Hermes) Unregister(id ReceiverID) error {
+func (net *Hermes) Leave(id ReceiverID) error {
 	if id == "" {
 		return errors.New("invalid_id")
 	}
 
-	err := net.Send("", id, &Unregistered{})
+	err := net.Send("", id, &Left{})
 	if err != nil {
 		return err
 	}

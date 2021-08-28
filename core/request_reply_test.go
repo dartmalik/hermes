@@ -130,7 +130,7 @@ func TestRequestReply(t *testing.T) {
 	}
 
 	gid := IOTDeviceGroupID("iot-dev-grp")
-	err = net.Register(gid)
+	err = net.Join(gid)
 	if err != nil {
 		t.Fatalf("failed to register device group: %s\n", err.Error())
 	}
@@ -152,7 +152,7 @@ func addDevices(net *Hermes, grp ReceiverID, deviceCount int) error {
 	for di := 0; di < deviceCount; di++ {
 		id := IOTDeviceID(fmt.Sprintf("d%d", di))
 
-		err := net.Register(id)
+		err := net.Join(id)
 		if err != nil {
 			return err
 		}
