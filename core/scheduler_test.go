@@ -115,7 +115,7 @@ func BenchmarkMessagePassing(b *testing.B) {
 	fmt.Printf("running test with runs: %d\n", b.N)
 
 	createMessagePassers(b, net, b.N)
-	//passMessages(b, net, b.N, 1)
+	passMessages(b, net, b.N, 1)
 	destroyMessagePassers(b, net, b.N)
 }
 

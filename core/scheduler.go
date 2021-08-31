@@ -250,9 +250,9 @@ func (ctx *Context) Reply(msg Message, reply interface{}) error {
 	return ctx.net.reply(msg, reply)
 }
 
-type Joined struct{}
+//type Joined struct{}
 
-type Left struct{}
+//type Left struct{}
 
 type Message interface {
 	Payload() interface{}
@@ -324,7 +324,7 @@ func (m *syncMap) delete(key string) {
 	- the 'from' field is required when sending a reply
 */
 type Hermes struct {
-	mu       sync.RWMutex
+	//mu       sync.RWMutex
 	exec     *Executor
 	contexts *syncMap //map[ReceiverID]*Context
 	requests *syncMap //map[string]*message
@@ -365,8 +365,6 @@ func (net *Hermes) Join(id ReceiverID) error {
 		return err
 	}
 
-	net.Send("", id, &Joined{})
-
 	return nil
 }
 
@@ -375,12 +373,7 @@ func (net *Hermes) Leave(id ReceiverID) error {
 		return errors.New("invalid_id")
 	}
 
-	err := net.Send("", id, &Left{})
-	if err != nil {
-		return err
-	}
-
-	err = net.doLeave(id)
+	err := net.doLeave(id)
 	if err != nil {
 		return err
 	}
