@@ -274,6 +274,48 @@ func (m *message) Payload() interface{} {
 	return m.payload
 }
 
+var ErrMapElementAlreadyExists = errors.New("already_exists")
+
+type syncMap struct {
+	mu       sync.RWMutex
+	elements map[string]interface{}
+}
+
+func newSyncMap() *syncMap {
+	return &syncMap{elements: make(map[string]interface{})}
+}
+
+func (m *syncMap) put(key string, value interface{}, overwrite bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !overwrite {
+		if _, ok := m.elements[key]; ok {
+			return ErrMapElementAlreadyExists
+		}
+	}
+
+	m.elements[key] = value
+
+	return nil
+}
+
+func (m *syncMap) get(key string) (interface{}, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	v, ok := m.elements[key]
+
+	return v, ok
+}
+
+func (m *syncMap) delete(key string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	delete(m.elements, key)
+}
+
 /*
 	- delivers messages from senders to receivers
 	- a request message is delivered to a receiver
@@ -282,10 +324,10 @@ func (m *message) Payload() interface{} {
 	- the 'from' field is required when sending a reply
 */
 type Hermes struct {
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	exec     *Executor
-	contexts map[ReceiverID]*Context
-	requests map[string]*message
+	contexts *syncMap //map[ReceiverID]*Context
+	requests *syncMap //map[string]*message
 	factory  ReceiverFactory
 }
 
@@ -300,9 +342,11 @@ func New(factory ReceiverFactory) (*Hermes, error) {
 	}
 
 	return &Hermes{
-		exec:     e,
-		contexts: make(map[ReceiverID]*Context),
-		requests: make(map[string]*message),
+		exec: e,
+		//contexts: make(map[ReceiverID]*Context),
+		//requests: make(map[string]*message),
+		contexts: newSyncMap(),
+		requests: newSyncMap(),
 		factory:  factory,
 	}, nil
 }
@@ -376,21 +420,32 @@ func (net *Hermes) reply(msg Message, reply interface{}) error {
 }
 
 func (net *Hermes) localSend(msg *message) error {
-	net.mu.Lock()
-	defer net.mu.Unlock()
-
 	if msg.corID != "" {
 		if msg.isRequest() /*&& msg.from != ""*/ {
-			if _, ok := net.requests[msg.corID]; ok {
-				return errors.New("request_already_exists")
-			}
+			/*
+				if _, ok := net.requests[msg.corID]; ok {
+					return errors.New("request_already_exists")
+				}
 
-			net.requests[msg.corID] = msg
+				net.requests[msg.corID] = msg
+			*/
+			net.requests.put(msg.corID, msg, false)
 		} else {
-			r, ok := net.requests[msg.corID]
+			/*
+				r, ok := net.requests[msg.corID]
+				if ok {
+					r.replyCh <- msg
+					delete(net.requests, msg.corID)
+
+					return nil
+				} else {
+					return errors.New("invalid_reply_correlation-id")
+				}
+			*/
+			r, ok := net.requests.get(msg.corID)
 			if ok {
-				r.replyCh <- msg
-				delete(net.requests, msg.corID)
+				r.(*message).replyCh <- msg
+				net.requests.delete(msg.corID)
 
 				return nil
 			} else {
@@ -399,13 +454,17 @@ func (net *Hermes) localSend(msg *message) error {
 		}
 	}
 
-	ctx := net.contexts[msg.to]
-	if ctx == nil {
+	//net.mu.RLock()
+	//defer net.mu.RUnlock()
+
+	//ctx := net.contexts[msg.to]
+	ctx, ok := net.contexts.get(string(msg.to))
+	if !ok {
 		return errors.New("unknown_receiver")
 	}
 
 	net.exec.Submit(string(msg.to), func() {
-		ctx.recv(ctx, msg)
+		ctx.(*Context).recv(ctx.(*Context), msg)
 	})
 
 	return nil
@@ -416,33 +475,40 @@ func (net *Hermes) doJoin(id ReceiverID, a Receiver) error {
 		return errors.New("invalid_id")
 	}
 
-	net.mu.Lock()
-	defer net.mu.Unlock()
+	//net.mu.Lock()
+	//defer net.mu.Unlock()
 
-	if _, ok := net.contexts[id]; ok {
-		return errors.New("already_joined")
-	}
+	//if _, ok := net.contexts[id]; ok {
+	//	return errors.New("already_joined")
+	//}
 
 	ctx, err := newContext(id, net, a)
 	if err != nil {
 		return err
 	}
 
-	net.contexts[id] = ctx
+	net.contexts.put(string(id), ctx, false)
+	//net.contexts[id] = ctx
 
 	return nil
 }
 
 func (net *Hermes) doLeave(id ReceiverID) error {
-	net.mu.Lock()
-	defer net.mu.Unlock()
+	//net.mu.Lock()
+	//defer net.mu.Unlock()
 
-	_, ok := net.contexts[id]
+	//_, ok := net.contexts[id]
+	//if !ok {
+	//	return errors.New("unknown_receiver")
+	//}
+
+	//delete(net.contexts, id)
+	_, ok := net.contexts.get(string(id))
 	if !ok {
 		return errors.New("unknown_receiver")
 	}
 
-	delete(net.contexts, id)
+	net.contexts.delete(string(id))
 
 	return nil
 }

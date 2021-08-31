@@ -119,7 +119,7 @@ func passMessage(t Tester, net *Hermes, run int, iter int) {
 	}
 
 	for i := 0; i < iter; i++ {
-		msg, err := net.RequestWithTimeout(a1, &SendPingRequest{to: a2}, 100*time.Millisecond)
+		msg, err := net.RequestWithTimeout(a1, &SendPingRequest{to: a2}, 1500*time.Millisecond)
 		if err != nil {
 			t.Fatalf("failed to send ping request: %s\n", err.Error())
 		}
