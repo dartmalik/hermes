@@ -51,7 +51,7 @@ func (a *PongActor) onSendPing(ctx *Context, msg Message) error {
 func (a *PongActor) onPing(ctx *Context, msg Message) {
 	a.count++
 
-	fmt.Printf("received ping: %d\n", a.count)
+	//fmt.Printf("received ping: %d\n", a.count)
 
 	ctx.Reply(msg, &Pong{})
 }
@@ -86,7 +86,21 @@ func TestMessagePassing(t *testing.T) {
 		t.Fatalf("new actor system failed with error: %s\n", err.Error())
 	}
 
-	passMessage(t, net, 0, 1000)
+	passMessageSingleRun(t, net, 5000)
+}
+
+func BenchmarkCreateReceivers(b *testing.B) {
+	net, err := New(func(id ReceiverID) (Receiver, error) {
+		a := &PongActor{}
+		return a.receive, nil
+	})
+	if err != nil {
+		b.Fatalf("new actor system failed with error: %s\n", err.Error())
+	}
+
+	fmt.Printf("running test with runs: %d\n", b.N)
+
+	createMessagePassers(b, net, b.N)
 }
 
 func BenchmarkMessagePassing(b *testing.B) {
@@ -99,39 +113,71 @@ func BenchmarkMessagePassing(b *testing.B) {
 	}
 
 	fmt.Printf("running test with runs: %d\n", b.N)
-	for ri := 0; ri < b.N; ri++ {
-		passMessage(b, net, ri, 1)
+
+	createMessagePassers(b, net, b.N)
+	//passMessages(b, net, b.N, 1)
+	destroyMessagePassers(b, net, b.N)
+}
+
+func createMessagePassers(t Tester, net *Hermes, runs int) {
+	for ri := 0; ri < runs; ri++ {
+		a1 := ReceiverID(fmt.Sprintf("t1-%d", ri))
+		a2 := ReceiverID(fmt.Sprintf("t2-%d", ri))
+
+		err := net.Join(a1)
+		if err != nil {
+			t.Fatalf("actor registeration failed with error: %s\n", err.Error())
+		}
+
+		err = net.Join(a2)
+		if err != nil {
+			t.Fatalf("actor registeration failed with error: %s\n", err.Error())
+		}
 	}
 }
 
-func passMessage(t Tester, net *Hermes, run int, iter int) {
-	a1 := ReceiverID(fmt.Sprintf("t1-%d", run))
-	a2 := ReceiverID(fmt.Sprintf("t2-%d", run))
+func passMessages(t Tester, net *Hermes, runs, iter int) {
+	replyChs := make([]chan Message, 0, runs*iter)
 
-	err := net.Join(a1)
-	if err != nil {
-		t.Fatalf("actor registeration failed with error: %s\n", err.Error())
-	}
+	for ri := 0; ri < runs; ri++ {
+		a1 := ReceiverID(fmt.Sprintf("t1-%d", ri))
+		a2 := ReceiverID(fmt.Sprintf("t2-%d", ri))
 
-	err = net.Join(a2)
-	if err != nil {
-		t.Fatalf("actor registeration failed with error: %s\n", err.Error())
-	}
-
-	for i := 0; i < iter; i++ {
-		msg, err := net.RequestWithTimeout(a1, &SendPingRequest{to: a2}, 1500*time.Millisecond)
-		if err != nil {
-			t.Fatalf("failed to send ping request: %s\n", err.Error())
-		}
-
-		r := msg.Payload().(*SendPingResponse)
-		if r.err != nil {
-			t.Fatalf("failed to send ping request: %s\n", err.Error())
+		for i := 0; i < iter; i++ {
+			replyChs = append(replyChs, net.Request(a1, &SendPingRequest{to: a2}))
 		}
 	}
 
-	net.Leave(a1)
-	net.Leave(a2)
+	for _, replyCh := range replyChs {
+		select {
+		case msg := <-replyCh:
+			r := msg.Payload().(*SendPingResponse)
+			if r.err != nil {
+				t.Fatalf("failed to send ping request: %s\n", r.err.Error())
+			}
+
+		case <-time.After(1500 * time.Millisecond):
+			t.Fatalf("request_timeout")
+		}
+	}
+}
+
+func destroyMessagePassers(t Tester, net *Hermes, runs int) {
+	for ri := 0; ri < runs; ri++ {
+		a1 := ReceiverID(fmt.Sprintf("t1-%d", ri))
+		a2 := ReceiverID(fmt.Sprintf("t2-%d", ri))
+
+		net.Leave(a1)
+		net.Leave(a2)
+	}
+}
+
+func passMessageSingleRun(t Tester, net *Hermes, iter int) {
+	createMessagePassers(t, net, 1)
+
+	passMessages(t, net, 1, iter)
+
+	destroyMessagePassers(t, net, 1)
 }
 
 func TestReceiverMembership(t *testing.T) {
