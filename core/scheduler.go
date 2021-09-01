@@ -377,13 +377,12 @@ func (net *Hermes) localSend(msg *message) error {
 	//defer net.mu.RUnlock()
 
 	//ctx := net.contexts[msg.to]
-	ci, ok := net.contexts.get(string(msg.to))
+	ctx, ok := net.contexts.get(string(msg.to))
 	if !ok {
 		return errors.New("unknown_receiver")
 	}
 
-	ctx := ci.(*Context)
-	ctx.submit(msg)
+	ctx.(*Context).submit(msg)
 
 	//net.exec.Submit(string(msg.to), func() {
 	//	ctx.(*Context).recv(ctx.(*Context), msg)
