@@ -341,26 +341,8 @@ func (net *Hermes) reply(msg Message, reply interface{}) error {
 func (net *Hermes) localSend(msg *message) error {
 	if msg.corID != "" {
 		if msg.isRequest() /*&& msg.from != ""*/ {
-			/*
-				if _, ok := net.requests[msg.corID]; ok {
-					return errors.New("request_already_exists")
-				}
-
-				net.requests[msg.corID] = msg
-			*/
 			net.requests.put(msg.corID, msg, false)
 		} else {
-			/*
-				r, ok := net.requests[msg.corID]
-				if ok {
-					r.replyCh <- msg
-					delete(net.requests, msg.corID)
-
-					return nil
-				} else {
-					return errors.New("invalid_reply_correlation-id")
-				}
-			*/
 			r, ok := net.requests.get(msg.corID)
 			if ok {
 				r.(*message).replyCh <- msg
@@ -373,20 +355,12 @@ func (net *Hermes) localSend(msg *message) error {
 		}
 	}
 
-	//net.mu.RLock()
-	//defer net.mu.RUnlock()
-
-	//ctx := net.contexts[msg.to]
 	ctx, ok := net.contexts.get(string(msg.to))
 	if !ok {
 		return errors.New("unknown_receiver")
 	}
 
 	ctx.(*Context).submit(msg)
-
-	//net.exec.Submit(string(msg.to), func() {
-	//	ctx.(*Context).recv(ctx.(*Context), msg)
-	//})
 
 	return nil
 }
@@ -396,34 +370,17 @@ func (net *Hermes) doJoin(id ReceiverID, a Receiver) error {
 		return errors.New("invalid_id")
 	}
 
-	//net.mu.Lock()
-	//defer net.mu.Unlock()
-
-	//if _, ok := net.contexts[id]; ok {
-	//	return errors.New("already_joined")
-	//}
-
 	ctx, err := newContext(id, net, a)
 	if err != nil {
 		return err
 	}
 
 	net.contexts.put(string(id), ctx, false)
-	//net.contexts[id] = ctx
 
 	return nil
 }
 
 func (net *Hermes) doLeave(id ReceiverID) error {
-	//net.mu.Lock()
-	//defer net.mu.Unlock()
-
-	//_, ok := net.contexts[id]
-	//if !ok {
-	//	return errors.New("unknown_receiver")
-	//}
-
-	//delete(net.contexts, id)
 	_, ok := net.contexts.get(string(id))
 	if !ok {
 		return errors.New("unknown_receiver")
