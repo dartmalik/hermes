@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/satori/uuid"
+	"github.com/google/uuid"
 )
 
 /*
@@ -354,7 +354,7 @@ func (net *Hermes) Send(from ReceiverID, to ReceiverID, payload interface{}) err
 }
 
 func (net *Hermes) Request(to ReceiverID, request interface{}) chan Message {
-	m := &message{to: to, corID: uuid.NewV4().String(), payload: request, replyCh: make(chan Message, 1)}
+	m := &message{to: to, corID: uuid.NewString(), payload: request, replyCh: make(chan Message, 1)}
 
 	net.localSend(m)
 
