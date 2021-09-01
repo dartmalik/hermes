@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/satori/uuid"
+	"github.com/google/uuid"
 )
 
 type runnable func()
@@ -100,7 +100,7 @@ func (e *Executor) Submit(key string, r runnable) {
 	defer e.mu.Unlock()
 
 	if key == "" {
-		key = uuid.NewV4().String()
+		key = uuid.NewString()
 	}
 
 	w, ok := e.workers[key]
