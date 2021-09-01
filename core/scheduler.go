@@ -2,6 +2,7 @@ package hermes
 
 import (
 	"errors"
+	"hash/maphash"
 	"sync"
 	"time"
 
@@ -205,44 +206,85 @@ func (m *message) Payload() interface{} {
 
 var ErrMapElementAlreadyExists = errors.New("already_exists")
 
-type syncMap struct {
-	mu       sync.RWMutex
-	elements map[string]interface{}
+type syncMapSegment struct {
+	mu   sync.RWMutex
+	elem map[string]interface{}
 }
 
-func newSyncMap() *syncMap {
-	return &syncMap{elements: make(map[string]interface{})}
+func newSyncMapSegment() *syncMapSegment {
+	return &syncMapSegment{elem: make(map[string]interface{})}
 }
 
-func (m *syncMap) put(key string, value interface{}, overwrite bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (seg *syncMapSegment) put(key string, value interface{}, overwrite bool) error {
+	seg.mu.Lock()
+	defer seg.mu.Unlock()
 
 	if !overwrite {
-		if _, ok := m.elements[key]; ok {
+		if _, ok := seg.elem[key]; ok {
 			return ErrMapElementAlreadyExists
 		}
 	}
 
-	m.elements[key] = value
+	seg.elem[key] = value
 
 	return nil
 }
 
-func (m *syncMap) get(key string) (interface{}, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+func (seg *syncMapSegment) get(key string) (interface{}, bool) {
+	seg.mu.RLock()
+	defer seg.mu.RUnlock()
 
-	v, ok := m.elements[key]
+	v, ok := seg.elem[key]
 
 	return v, ok
 }
 
-func (m *syncMap) delete(key string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (seg *syncMapSegment) delete(key string) {
+	seg.mu.Lock()
+	defer seg.mu.Unlock()
 
-	delete(m.elements, key)
+	delete(seg.elem, key)
+}
+
+const SyncMapSegments = 64
+
+type syncMap struct {
+	seg  []*syncMapSegment
+	seed maphash.Seed
+}
+
+func newSyncMap() *syncMap {
+	seg := make([]*syncMapSegment, SyncMapSegments)
+	for si := 0; si < SyncMapSegments; si++ {
+		seg[si] = newSyncMapSegment()
+	}
+
+	return &syncMap{
+		seg:  seg,
+		seed: maphash.MakeSeed(),
+	}
+}
+
+func (m *syncMap) put(key string, value interface{}, overwrite bool) error {
+	return m.segment(key).put(key, value, overwrite)
+}
+
+func (m *syncMap) get(key string) (interface{}, bool) {
+	return m.segment(key).get(key)
+}
+
+func (m *syncMap) delete(key string) {
+	m.segment(key).delete(key)
+}
+
+func (m *syncMap) segment(key string) *syncMapSegment {
+	var hash maphash.Hash
+
+	hash.SetSeed(m.seed)
+	hash.WriteString(key)
+	si := int(hash.Sum64() % SyncMapSegments)
+
+	return m.seg[si]
 }
 
 /*
