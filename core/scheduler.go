@@ -27,12 +27,12 @@ func NewQueue() *Queue {
 	return &Queue{elements: make(map[uint64]interface{}), head: 0, tail: 0}
 }
 
-func (q *Queue) Add(element interface{}) error {
+func (q *Queue) Add(element interface{}) (int, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	if len(q.elements) > 8192 {
-		return ErrIllegalState
+	if len(q.elements) >= 8192 {
+		return 8192, ErrIllegalState
 	}
 
 	q.tail++
@@ -42,7 +42,20 @@ func (q *Queue) Add(element interface{}) error {
 		q.head = q.tail
 	}
 
-	return nil
+	return len(q.elements), nil
+}
+
+func (q *Queue) Peek() interface{} {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if len(q.elements) <= 0 {
+		return nil
+	}
+
+	e := q.elements[q.head]
+
+	return e
 }
 
 func (q *Queue) Remove() interface{} {
@@ -56,6 +69,25 @@ func (q *Queue) Remove() interface{} {
 	e := q.elements[q.head]
 	delete(q.elements, q.head)
 	q.head++
+
+	return e
+}
+
+func (q *Queue) RemoveAndPeek() interface{} {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if len(q.elements) <= 0 {
+		return nil
+	}
+
+	delete(q.elements, q.head)
+	q.head++
+
+	if len(q.elements) <= 0 {
+		return nil
+	}
+	e := q.elements[q.head]
 
 	return e
 }
@@ -92,7 +124,9 @@ func (w *worker) submitTask(r runnable) error {
 		return errors.New("invalid_runnable")
 	}
 
-	return w.tasks.Add(r)
+	_, err := w.tasks.Add(r)
+
+	return err
 }
 
 func (w *worker) backlog() int {
@@ -195,6 +229,8 @@ func (e *Executor) removeIdleWorkers() {
 	}
 }
 
+var ErrInvalidMessage = errors.New("invalid_message")
+
 type ReceiverID string
 
 type Receiver func(ctx *Context, msg Message)
@@ -202,9 +238,10 @@ type Receiver func(ctx *Context, msg Message)
 type ReceiverFactory func(id ReceiverID) (Receiver, error)
 
 type Context struct {
-	id   ReceiverID
-	net  *Hermes
-	recv Receiver
+	id      ReceiverID
+	net     *Hermes
+	recv    Receiver
+	mailbox *Queue
 }
 
 func newContext(id ReceiverID, net *Hermes, recv Receiver) (*Context, error) {
@@ -218,7 +255,7 @@ func newContext(id ReceiverID, net *Hermes, recv Receiver) (*Context, error) {
 		return nil, errors.New("invalid_receiver")
 	}
 
-	return &Context{id: id, net: net, recv: recv}, nil
+	return &Context{id: id, net: net, recv: recv, mailbox: NewQueue()}, nil
 }
 
 func (ctx *Context) SetReceiver(recv Receiver) {
@@ -250,9 +287,31 @@ func (ctx *Context) Reply(msg Message, reply interface{}) error {
 	return ctx.net.reply(msg, reply)
 }
 
-//type Joined struct{}
+func (ctx *Context) submit(msg Message) error {
+	if msg == nil {
+		return ErrInvalidMessage
+	}
 
-//type Left struct{}
+	sz, err := ctx.mailbox.Add(msg)
+	if err != nil {
+		return err
+	}
+
+	if sz == 1 {
+		go func() {
+			for e := ctx.mailbox.Peek(); e != nil; {
+				ctx.recv(ctx, e.(Message))
+				e = ctx.mailbox.RemoveAndPeek()
+			}
+		}()
+	}
+
+	return nil
+}
+
+type Joined struct{}
+
+type Leaving struct{}
 
 type Message interface {
 	Payload() interface{}
@@ -324,10 +383,8 @@ func (m *syncMap) delete(key string) {
 	- the 'from' field is required when sending a reply
 */
 type Hermes struct {
-	//mu       sync.RWMutex
-	exec     *Executor
-	contexts *syncMap //map[ReceiverID]*Context
-	requests *syncMap //map[string]*message
+	contexts *syncMap
+	requests *syncMap
 	factory  ReceiverFactory
 }
 
@@ -336,15 +393,7 @@ func New(factory ReceiverFactory) (*Hermes, error) {
 		return nil, errors.New("invalid_factory")
 	}
 
-	e, err := NewExecutor()
-	if err != nil {
-		return nil, err
-	}
-
 	return &Hermes{
-		exec: e,
-		//contexts: make(map[ReceiverID]*Context),
-		//requests: make(map[string]*message),
 		contexts: newSyncMap(),
 		requests: newSyncMap(),
 		factory:  factory,
@@ -365,6 +414,8 @@ func (net *Hermes) Join(id ReceiverID) error {
 		return err
 	}
 
+	net.Send("", id, &Joined{})
+
 	return nil
 }
 
@@ -373,7 +424,12 @@ func (net *Hermes) Leave(id ReceiverID) error {
 		return errors.New("invalid_id")
 	}
 
-	err := net.doLeave(id)
+	err := net.Send("", id, &Leaving{})
+	if err != nil {
+		return err
+	}
+
+	err = net.doLeave(id)
 	if err != nil {
 		return err
 	}
@@ -451,14 +507,17 @@ func (net *Hermes) localSend(msg *message) error {
 	//defer net.mu.RUnlock()
 
 	//ctx := net.contexts[msg.to]
-	ctx, ok := net.contexts.get(string(msg.to))
+	ci, ok := net.contexts.get(string(msg.to))
 	if !ok {
 		return errors.New("unknown_receiver")
 	}
 
-	net.exec.Submit(string(msg.to), func() {
-		ctx.(*Context).recv(ctx.(*Context), msg)
-	})
+	ctx := ci.(*Context)
+	ctx.submit(msg)
+
+	//net.exec.Submit(string(msg.to), func() {
+	//	ctx.(*Context).recv(ctx.(*Context), msg)
+	//})
 
 	return nil
 }
