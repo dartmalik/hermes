@@ -422,9 +422,7 @@ func (net *Hermes) doJoin(id ReceiverID, a Receiver) error {
 		return err
 	}
 
-	net.contexts.put(string(id), ctx, false)
-
-	return nil
+	return net.contexts.put(string(id), ctx, false)
 }
 
 func (net *Hermes) doLeave(id ReceiverID) error {
