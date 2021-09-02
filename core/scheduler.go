@@ -230,15 +230,24 @@ func New(factory ReceiverFactory) (*Hermes, error) {
 }
 
 func (net *Hermes) Join(id ReceiverID) error {
-	r, err := net.factory(id)
+	if id == "" {
+		return errors.New("invalid_id")
+	}
+
+	recv, err := net.factory(id)
 	if err != nil {
 		return err
 	}
-	if r == nil {
+	if recv == nil {
 		return errors.New("invalid_receiver_created")
 	}
 
-	err = net.doJoin(id, r)
+	ctx, err := newContext(id, net, recv)
+	if err != nil {
+		return err
+	}
+
+	err = net.contexts.put(string(id), ctx, false)
 	if err != nil {
 		return err
 	}
@@ -258,10 +267,12 @@ func (net *Hermes) Leave(id ReceiverID) error {
 		return err
 	}
 
-	err = net.doLeave(id)
-	if err != nil {
-		return err
+	_, ok := net.contexts.get(string(id))
+	if !ok {
+		return errors.New("unknown_receiver")
 	}
+
+	net.contexts.delete(string(id))
 
 	return nil
 }
@@ -324,30 +335,6 @@ func (net *Hermes) localSend(msg *message) error {
 	}
 
 	ctx.(*Context).submit(msg)
-
-	return nil
-}
-
-func (net *Hermes) doJoin(id ReceiverID, a Receiver) error {
-	if id == "" {
-		return errors.New("invalid_id")
-	}
-
-	ctx, err := newContext(id, net, a)
-	if err != nil {
-		return err
-	}
-
-	return net.contexts.put(string(id), ctx, false)
-}
-
-func (net *Hermes) doLeave(id ReceiverID) error {
-	_, ok := net.contexts.get(string(id))
-	if !ok {
-		return errors.New("unknown_receiver")
-	}
-
-	net.contexts.delete(string(id))
 
 	return nil
 }
