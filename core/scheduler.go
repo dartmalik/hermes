@@ -2,11 +2,11 @@ package hermes
 
 import (
 	"errors"
+	"fmt"
 	"hash/maphash"
 	"sync"
+	"sync/atomic"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 /*
@@ -297,6 +297,7 @@ func (m *syncMap) segment(key string) *syncMapSegment {
 type Hermes struct {
 	contexts *syncMap
 	requests *syncMap
+	reqID    uint64
 	factory  ReceiverFactory
 }
 
@@ -354,11 +355,15 @@ func (net *Hermes) Send(from ReceiverID, to ReceiverID, payload interface{}) err
 }
 
 func (net *Hermes) Request(to ReceiverID, request interface{}) chan Message {
-	m := &message{to: to, corID: uuid.NewString(), payload: request, replyCh: make(chan Message, 1)}
+	m := &message{to: to, corID: fmt.Sprintf("%d", net.nextReqID()), payload: request, replyCh: make(chan Message, 1)}
 
 	net.localSend(m)
 
 	return m.replyCh
+}
+
+func (net *Hermes) nextReqID() uint64 {
+	return atomic.AddUint64(&net.reqID, 1)
 }
 
 func (net *Hermes) RequestWithTimeout(to ReceiverID, request interface{}, timeout time.Duration) (Message, error) {
