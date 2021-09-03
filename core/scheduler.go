@@ -107,11 +107,18 @@ type Receiver func(ctx *Context, msg Message)
 
 type ReceiverFactory func(id ReceiverID) (Receiver, error)
 
+const (
+	ContextStopped = iota
+	ContextIdle
+	ContextProcessing
+)
+
 type Context struct {
 	id      ReceiverID
 	net     *Hermes
 	recv    Receiver
 	mailbox *Queue
+	state   int32
 }
 
 func newContext(id ReceiverID, net *Hermes, recv Receiver) (*Context, error) {
@@ -125,7 +132,11 @@ func newContext(id ReceiverID, net *Hermes, recv Receiver) (*Context, error) {
 		return nil, errors.New("invalid_receiver")
 	}
 
-	return &Context{id: id, net: net, recv: recv, mailbox: NewQueue()}, nil
+	return &Context{state: ContextIdle, id: id, net: net, recv: recv, mailbox: NewQueue()}, nil
+}
+
+func (ctx *Context) Stop() {
+	atomic.StoreInt32(&ctx.state, ContextStopped)
 }
 
 func (ctx *Context) SetReceiver(recv Receiver) {
@@ -158,21 +169,33 @@ func (ctx *Context) submit(msg Message) error {
 		return ErrInvalidMessage
 	}
 
-	sz, err := ctx.mailbox.Add(msg)
+	_, err := ctx.mailbox.Add(msg)
 	if err != nil {
 		return err
 	}
 
-	if sz == 1 {
-		go func() {
-			for e := ctx.mailbox.Peek(); e != nil; {
-				ctx.recv(ctx, e.(Message))
-				e = ctx.mailbox.RemoveAndPeek()
-			}
-		}()
+	if atomic.CompareAndSwapInt32(&ctx.state, ContextIdle, ContextProcessing) {
+		go ctx.process()
 	}
 
 	return nil
+}
+
+func (ctx *Context) process() {
+	ctx.processMessages()
+
+	for ctx.mailbox.Size() > 0 &&
+		atomic.CompareAndSwapInt32(&ctx.state, ContextIdle, ContextProcessing) {
+		ctx.processMessages()
+	}
+}
+
+func (ctx *Context) processMessages() {
+	for e := ctx.mailbox.Peek(); e != nil; {
+		ctx.recv(ctx, e.(Message))
+		e = ctx.mailbox.RemoveAndPeek()
+	}
+	atomic.StoreInt32(&ctx.state, ContextIdle)
 }
 
 type Joined struct{}
@@ -297,14 +320,14 @@ func (net *Hermes) context(id ReceiverID) (*Context, error) {
 		return nil, err
 	}
 
-	err = net.contexts.put(string(id), ctx, false)
+	err = net.contexts.putAndInit(string(id), ctx, false, func() {
+		ctx.submit(&message{to: id, payload: &Joined{}})
+	})
 	if err != nil {
 		elem, _ = net.contexts.get(string(id))
 
 		return elem.(*Context), nil
 	}
-
-	ctx.submit(&message{to: id, payload: &Joined{}})
 
 	return ctx, nil
 }

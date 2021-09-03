@@ -17,7 +17,7 @@ func newSyncMapSegment() *syncMapSegment {
 	return &syncMapSegment{elem: make(map[string]interface{})}
 }
 
-func (seg *syncMapSegment) put(key string, value interface{}, overwrite bool) error {
+func (seg *syncMapSegment) put(key string, value interface{}, overwrite bool, initCB func()) error {
 	seg.mu.Lock()
 	defer seg.mu.Unlock()
 
@@ -28,6 +28,10 @@ func (seg *syncMapSegment) put(key string, value interface{}, overwrite bool) er
 	}
 
 	seg.elem[key] = value
+
+	if initCB != nil {
+		initCB()
+	}
 
 	return nil
 }
@@ -68,7 +72,11 @@ func newSyncMap() *syncMap {
 }
 
 func (m *syncMap) put(key string, value interface{}, overwrite bool) error {
-	return m.segment(key).put(key, value, overwrite)
+	return m.segment(key).put(key, value, overwrite, nil)
+}
+
+func (m *syncMap) putAndInit(key string, value interface{}, overwrite bool, initCB func()) error {
+	return m.segment(key).put(key, value, overwrite, initCB)
 }
 
 func (m *syncMap) get(key string) (interface{}, bool) {
