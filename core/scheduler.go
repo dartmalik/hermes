@@ -235,10 +235,6 @@ func (net *Hermes) Request(to ReceiverID, request interface{}) chan Message {
 	return m.replyCh
 }
 
-func (net *Hermes) nextReqID() uint64 {
-	return atomic.AddUint64(&net.reqID, 1)
-}
-
 func (net *Hermes) RequestWithTimeout(to ReceiverID, request interface{}, timeout time.Duration) (Message, error) {
 	select {
 	case reply := <-net.Request(to, request):
@@ -311,4 +307,8 @@ func (net *Hermes) context(id ReceiverID) (*Context, error) {
 	ctx.submit(&message{to: id, payload: &Joined{}})
 
 	return ctx, nil
+}
+
+func (net *Hermes) nextReqID() uint64 {
+	return atomic.AddUint64(&net.reqID, 1)
 }
