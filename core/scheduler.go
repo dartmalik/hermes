@@ -195,7 +195,7 @@ func (ctx *Context) processMessages() {
 		ctx.recv(ctx, e.(Message))
 		e = ctx.mailbox.RemoveAndPeek()
 	}
-	atomic.StoreInt32(&ctx.state, ContextIdle)
+	atomic.CompareAndSwapInt32(&ctx.state, ContextProcessing, ContextIdle)
 }
 
 type Joined struct{}
