@@ -132,10 +132,6 @@ func (ctx *Context) SetReceiver(recv Receiver) {
 	ctx.recv = recv
 }
 
-func (ctx *Context) Join(id ReceiverID) error {
-	return ctx.net.Join(id)
-}
-
 func (ctx *Context) Send(to ReceiverID, payload interface{}) error {
 	return ctx.net.Send(ctx.id, to, payload)
 }
@@ -225,49 +221,6 @@ func New(factory ReceiverFactory) (*Hermes, error) {
 		requests: newSyncMap(),
 		factory:  factory,
 	}, nil
-}
-
-func (net *Hermes) Join(id ReceiverID) error {
-	if id == "" {
-		return errors.New("invalid_id")
-	}
-
-	recv, err := net.factory(id)
-	if err != nil {
-		return err
-	}
-	if recv == nil {
-		return errors.New("invalid_receiver_created")
-	}
-
-	ctx, err := newContext(id, net, recv)
-	if err != nil {
-		return err
-	}
-
-	err = net.contexts.put(string(id), ctx, false)
-	if err != nil {
-		return err
-	}
-
-	net.Send("", id, &Joined{})
-
-	return nil
-}
-
-func (net *Hermes) Leave(id ReceiverID) error {
-	if id == "" {
-		return errors.New("invalid_id")
-	}
-
-	_, ok := net.contexts.get(string(id))
-	if !ok {
-		return errors.New("unknown_receiver")
-	}
-
-	net.contexts.delete(string(id))
-
-	return nil
 }
 
 func (net *Hermes) Send(from ReceiverID, to ReceiverID, payload interface{}) error {
