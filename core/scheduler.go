@@ -181,8 +181,6 @@ func (ctx *Context) submit(msg Message) error {
 
 type Joined struct{}
 
-type Leaving struct{}
-
 type Message interface {
 	Payload() interface{}
 }
@@ -260,11 +258,6 @@ func (net *Hermes) Join(id ReceiverID) error {
 func (net *Hermes) Leave(id ReceiverID) error {
 	if id == "" {
 		return errors.New("invalid_id")
-	}
-
-	err := net.Send("", id, &Leaving{})
-	if err != nil {
-		return err
 	}
 
 	_, ok := net.contexts.get(string(id))
