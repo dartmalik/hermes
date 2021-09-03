@@ -322,12 +322,38 @@ func (net *Hermes) localSend(msg *message) error {
 		}
 	}
 
-	ctx, ok := net.contexts.get(string(msg.to))
-	if !ok {
-		return errors.New("unknown_receiver")
+	ctx, err := net.context(msg.to)
+	if err != nil {
+		return err
 	}
 
-	ctx.(*Context).submit(msg)
+	ctx.submit(msg)
 
 	return nil
+}
+
+func (net *Hermes) context(id ReceiverID) (*Context, error) {
+	elem, ok := net.contexts.get(string(id))
+	if ok {
+		return elem.(*Context), nil
+	}
+
+	recv, err := net.factory(id)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, err := newContext(id, net, recv)
+	if err != nil {
+		return nil, err
+	}
+
+	err = net.contexts.put(string(id), ctx, false)
+	if err != nil {
+		elem, _ = net.contexts.get(string(id))
+
+		return elem.(*Context), nil
+	}
+
+	return ctx, nil
 }
