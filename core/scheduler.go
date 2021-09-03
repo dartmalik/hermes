@@ -308,5 +308,7 @@ func (net *Hermes) context(id ReceiverID) (*Context, error) {
 		return elem.(*Context), nil
 	}
 
+	ctx.submit(&message{to: id, payload: &Joined{}})
+
 	return ctx, nil
 }
