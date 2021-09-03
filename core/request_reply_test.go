@@ -84,7 +84,12 @@ func (grp *IOTDeviceGroup) onMeasure(ctx *Context, msg Message) {
 	reqChs := make([]chan Message, 0, len(grp.devices))
 
 	for id := range grp.devices {
-		reqCh := ctx.Request(id, &IOTDeviceMeasureRequest{})
+		reqCh, err := ctx.Request(id, &IOTDeviceMeasureRequest{})
+		if err != nil {
+			ctx.Reply(msg, &IOTDeviceGroupMeasureResponse{err: err})
+			return
+		}
+
 		reqChs = append(reqChs, reqCh)
 	}
 

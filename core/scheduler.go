@@ -147,7 +147,7 @@ func (ctx *Context) Send(to ReceiverID, payload interface{}) error {
 	return ctx.net.Send(ctx.id, to, payload)
 }
 
-func (ctx *Context) Request(to ReceiverID, request interface{}) chan Message {
+func (ctx *Context) Request(to ReceiverID, request interface{}) (chan Message, error) {
 	return ctx.net.Request(to, request)
 }
 
@@ -250,17 +250,25 @@ func (net *Hermes) Send(from ReceiverID, to ReceiverID, payload interface{}) err
 	return net.localSend(&message{from: from, to: to, payload: payload})
 }
 
-func (net *Hermes) Request(to ReceiverID, request interface{}) chan Message {
+func (net *Hermes) Request(to ReceiverID, request interface{}) (chan Message, error) {
 	m := &message{to: to, corID: fmt.Sprintf("%d", net.nextReqID()), payload: request, replyCh: make(chan Message, 1)}
 
-	net.localSend(m)
+	err := net.localSend(m)
+	if err != nil {
+		return nil, err
+	}
 
-	return m.replyCh
+	return m.replyCh, nil
 }
 
 func (net *Hermes) RequestWithTimeout(to ReceiverID, request interface{}, timeout time.Duration) (Message, error) {
+	replyCh, err := net.Request(to, request)
+	if err != nil {
+		return nil, err
+	}
+
 	select {
-	case reply := <-net.Request(to, request):
+	case reply := <-replyCh:
 		return reply, nil
 
 	case <-time.After(timeout):
