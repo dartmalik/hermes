@@ -99,6 +99,58 @@ func (q *Queue) Size() int {
 	return len(q.elements)
 }
 
+type Mailbox struct {
+	msgs      *Queue
+	onProcess func(Message)
+	state     int32
+}
+
+func newMailbox(onProcess func(Message)) (*Mailbox, error) {
+	if onProcess == nil {
+		return nil, errors.New("invalid_process_cb")
+	}
+
+	return &Mailbox{msgs: NewQueue(), onProcess: onProcess, state: ContextIdle}, nil
+}
+
+func (box *Mailbox) stop() {
+	atomic.StoreInt32(&box.state, ContextStopped)
+}
+
+func (box *Mailbox) post(msg Message) error {
+	if msg == nil {
+		return ErrInvalidMessage
+	}
+
+	_, err := box.msgs.Add(msg)
+	if err != nil {
+		return err
+	}
+
+	if atomic.CompareAndSwapInt32(&box.state, ContextIdle, ContextProcessing) {
+		go box.process()
+	}
+
+	return nil
+}
+
+func (box *Mailbox) process() {
+	box.processMessages()
+
+	for box.msgs.Size() > 0 &&
+		atomic.CompareAndSwapInt32(&box.state, ContextIdle, ContextProcessing) {
+		box.processMessages()
+	}
+}
+
+func (box *Mailbox) processMessages() {
+	for e := box.msgs.Peek(); e != nil; {
+		box.onProcess(e.(Message))
+		e = box.msgs.RemoveAndPeek()
+	}
+	atomic.CompareAndSwapInt32(&box.state, ContextProcessing, ContextIdle)
+}
+
 var ErrInvalidMessage = errors.New("invalid_message")
 
 type ReceiverID string
@@ -117,8 +169,7 @@ type Context struct {
 	id      ReceiverID
 	net     *Hermes
 	recv    Receiver
-	mailbox *Queue
-	state   int32
+	mailbox *Mailbox
 }
 
 func newContext(id ReceiverID, net *Hermes, recv Receiver) (*Context, error) {
@@ -132,11 +183,23 @@ func newContext(id ReceiverID, net *Hermes, recv Receiver) (*Context, error) {
 		return nil, errors.New("invalid_receiver")
 	}
 
-	return &Context{state: ContextIdle, id: id, net: net, recv: recv, mailbox: NewQueue()}, nil
+	ctx := &Context{id: id, net: net, recv: recv}
+
+	mb, err := newMailbox(ctx.onProcess)
+	if err != nil {
+		return nil, err
+	}
+	ctx.mailbox = mb
+
+	return ctx, nil
+}
+
+func (ctx *Context) onProcess(msg Message) {
+	ctx.recv(ctx, msg)
 }
 
 func (ctx *Context) Stop() {
-	atomic.StoreInt32(&ctx.state, ContextStopped)
+	ctx.mailbox.stop()
 }
 
 func (ctx *Context) SetReceiver(recv Receiver) {
@@ -165,37 +228,7 @@ func (ctx *Context) Reply(msg Message, reply interface{}) error {
 }
 
 func (ctx *Context) submit(msg Message) error {
-	if msg == nil {
-		return ErrInvalidMessage
-	}
-
-	_, err := ctx.mailbox.Add(msg)
-	if err != nil {
-		return err
-	}
-
-	if atomic.CompareAndSwapInt32(&ctx.state, ContextIdle, ContextProcessing) {
-		go ctx.process()
-	}
-
-	return nil
-}
-
-func (ctx *Context) process() {
-	ctx.processMessages()
-
-	for ctx.mailbox.Size() > 0 &&
-		atomic.CompareAndSwapInt32(&ctx.state, ContextIdle, ContextProcessing) {
-		ctx.processMessages()
-	}
-}
-
-func (ctx *Context) processMessages() {
-	for e := ctx.mailbox.Peek(); e != nil; {
-		ctx.recv(ctx, e.(Message))
-		e = ctx.mailbox.RemoveAndPeek()
-	}
-	atomic.CompareAndSwapInt32(&ctx.state, ContextProcessing, ContextIdle)
+	return ctx.mailbox.post(msg)
 }
 
 type Joined struct{}
