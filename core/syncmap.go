@@ -75,10 +75,6 @@ func (m *syncMap) put(key string, value interface{}, overwrite bool) error {
 	return m.segment(key).put(key, value, overwrite, nil)
 }
 
-func (m *syncMap) putAndInit(key string, value interface{}, overwrite bool, initCB func()) error {
-	return m.segment(key).put(key, value, overwrite, initCB)
-}
-
 func (m *syncMap) get(key string) (interface{}, bool) {
 	return m.segment(key).get(key)
 }
