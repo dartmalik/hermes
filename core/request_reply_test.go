@@ -153,7 +153,7 @@ func addDevices(net *Hermes, grp ReceiverID, deviceCount int) error {
 	for di := 0; di < deviceCount; di++ {
 		id := IOTDeviceID(fmt.Sprintf("d%d", di))
 
-		m, err := net.RequestWithTimeout(grp, &IOTDeviceGroupAddRequest{deviceID: id}, 100*time.Millisecond)
+		m, err := net.RequestWithTimeout("", grp, &IOTDeviceGroupAddRequest{deviceID: id}, 100*time.Millisecond)
 		if err != nil {
 			return err
 		}
@@ -168,7 +168,7 @@ func addDevices(net *Hermes, grp ReceiverID, deviceCount int) error {
 }
 
 func measure(net *Hermes, grp ReceiverID, deviceCount int) error {
-	res, err := net.RequestWithTimeout(grp, &IOTDeviceGroupMeasureRequest{}, 1000*time.Millisecond)
+	res, err := net.RequestWithTimeout("", grp, &IOTDeviceGroupMeasureRequest{}, 1000*time.Millisecond)
 	if err != nil {
 		return err
 	}

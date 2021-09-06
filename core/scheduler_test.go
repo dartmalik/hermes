@@ -94,7 +94,7 @@ func passMessages(t Tester, net *Hermes, runs, iter int) {
 		a2 := ReceiverID(fmt.Sprintf("t2-%d", ri))
 
 		for i := 0; i < iter; i++ {
-			replyCh, err := net.Request(a1, &SendPingRequest{to: a2})
+			replyCh, err := net.Request("", a1, &SendPingRequest{to: a2})
 			if err != nil {
 				t.Fatalf("failed to send ping request: %s\n", err.Error())
 			}

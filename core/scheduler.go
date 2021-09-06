@@ -3,6 +3,7 @@ package hermes
 import (
 	"errors"
 	"fmt"
+	"hash/maphash"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -113,8 +114,8 @@ func newMailbox(onProcess func(Message)) (*Mailbox, error) {
 	return &Mailbox{msgs: NewQueue(), onProcess: onProcess, state: ContextIdle}, nil
 }
 
-func (box *Mailbox) stop() {
-	atomic.StoreInt32(&box.state, ContextStopped)
+func (box *Mailbox) stop() bool {
+	return atomic.CompareAndSwapInt32(&box.state, ContextIdle, ContextStopped)
 }
 
 func (box *Mailbox) post(msg Message) error {
@@ -198,8 +199,8 @@ func (ctx *Context) onProcess(msg Message) {
 	ctx.recv(ctx, msg)
 }
 
-func (ctx *Context) Stop() {
-	ctx.mailbox.stop()
+func (ctx *Context) Stop() bool {
+	return ctx.mailbox.stop()
 }
 
 func (ctx *Context) SetReceiver(recv Receiver) {
@@ -211,11 +212,11 @@ func (ctx *Context) Send(to ReceiverID, payload interface{}) error {
 }
 
 func (ctx *Context) Request(to ReceiverID, request interface{}) (chan Message, error) {
-	return ctx.net.Request(to, request)
+	return ctx.net.Request(ctx.id, to, request)
 }
 
 func (ctx *Context) RequestWithTimeout(to ReceiverID, request interface{}, timeout time.Duration) (Message, error) {
-	return ctx.net.RequestWithTimeout(to, request, timeout)
+	return ctx.net.RequestWithTimeout(ctx.id, to, request, timeout)
 }
 
 func (ctx *Context) Reply(msg Message, reply interface{}) error {
@@ -245,13 +246,14 @@ type message struct {
 	replyCh chan Message
 }
 
-func (m *message) isRequest() bool {
-	return m.replyCh != nil
-}
-
 func (m *message) Payload() interface{} {
 	return m.payload
 }
+
+const (
+	RouterCount = 20
+	IdleTimeout = 5 * time.Second
+)
 
 /*
 	- delivers messages from senders to receivers
@@ -261,10 +263,11 @@ func (m *message) Payload() interface{} {
 	- the 'from' field is required when sending a reply
 */
 type Hermes struct {
-	contexts *syncMap
-	requests *syncMap
-	reqID    uint64
-	factory  ReceiverFactory
+	reqID   uint64
+	factory ReceiverFactory
+	routers []*Router
+	reqs    *syncMap
+	seed    maphash.Seed
 }
 
 func New(factory ReceiverFactory) (*Hermes, error) {
@@ -272,30 +275,54 @@ func New(factory ReceiverFactory) (*Hermes, error) {
 		return nil, errors.New("invalid_factory")
 	}
 
-	return &Hermes{
-		contexts: newSyncMap(),
-		requests: newSyncMap(),
-		factory:  factory,
-	}, nil
+	net := &Hermes{
+		routers: make([]*Router, RouterCount),
+		reqs:    newSyncMap(),
+		factory: factory,
+		seed:    maphash.MakeSeed(),
+	}
+
+	for ri := 0; ri < RouterCount; ri++ {
+		r, err := newRouter(net, factory)
+		if err != nil {
+			return nil, err
+		}
+
+		net.routers[ri] = r
+	}
+
+	return net, nil
 }
 
 func (net *Hermes) Send(from ReceiverID, to ReceiverID, payload interface{}) error {
 	return net.localSend(&message{from: from, to: to, payload: payload})
 }
 
-func (net *Hermes) Request(to ReceiverID, request interface{}) (chan Message, error) {
-	m := &message{to: to, corID: fmt.Sprintf("%d", net.nextReqID()), payload: request, replyCh: make(chan Message, 1)}
+func (net *Hermes) Request(from, to ReceiverID, request interface{}) (chan Message, error) {
+	m := &message{
+		from:    from,
+		to:      to,
+		corID:   fmt.Sprintf("%d", net.nextReqID()),
+		payload: request,
+		replyCh: make(chan Message, 1),
+	}
 
-	err := net.localSend(m)
+	err := net.reqs.put(m.corID, m, false)
 	if err != nil {
+		return nil, err
+	}
+
+	err = net.localSend(m)
+	if err != nil {
+		net.reqs.delete(m.corID)
 		return nil, err
 	}
 
 	return m.replyCh, nil
 }
 
-func (net *Hermes) RequestWithTimeout(to ReceiverID, request interface{}, timeout time.Duration) (Message, error) {
-	replyCh, err := net.Request(to, request)
+func (net *Hermes) RequestWithTimeout(from, to ReceiverID, request interface{}, timeout time.Duration) (Message, error) {
+	replyCh, err := net.Request(from, to, request)
 	if err != nil {
 		return nil, err
 	}
@@ -315,64 +342,142 @@ func (net *Hermes) reply(msg Message, reply interface{}) error {
 		return errors.New("invalid_message")
 	}
 
-	return net.localSend(&message{from: im.to, corID: im.corID, payload: reply})
-}
-
-func (net *Hermes) localSend(msg *message) error {
-	if msg.corID != "" {
-		if msg.isRequest() /*&& msg.from != ""*/ {
-			net.requests.put(msg.corID, msg, false)
-		} else {
-			r, ok := net.requests.get(msg.corID)
-			if ok {
-				r.(*message).replyCh <- msg
-				net.requests.delete(msg.corID)
-
-				return nil
-			} else {
-				return errors.New("invalid_reply_correlation-id")
-			}
-		}
+	req, ok := net.reqs.get(im.corID)
+	if !ok {
+		return errors.New("invalid_cor-id")
 	}
 
-	ctx, err := net.context(msg.to)
-	if err != nil {
-		return err
-	}
-
-	ctx.submit(msg)
+	rm := req.(*message)
+	rm.replyCh <- &message{from: im.to, to: im.from, corID: im.corID, payload: reply}
 
 	return nil
 }
 
-func (net *Hermes) context(id ReceiverID) (*Context, error) {
-	elem, ok := net.contexts.get(string(id))
-	if ok {
-		return elem.(*Context), nil
-	}
+func (net *Hermes) localSend(msg *message) error {
+	r := net.router(string(msg.to))
+	return r.send(msg)
+}
 
-	recv, err := net.factory(id)
-	if err != nil {
-		return nil, err
-	}
+func (net *Hermes) router(key string) *Router {
+	var hash maphash.Hash
 
-	ctx, err := newContext(id, net, recv)
-	if err != nil {
-		return nil, err
-	}
+	hash.SetSeed(net.seed)
+	hash.WriteString(key)
+	ri := int(hash.Sum64() % RouterCount)
 
-	err = net.contexts.putAndInit(string(id), ctx, false, func() {
-		ctx.submit(&message{to: id, payload: &Joined{}})
-	})
-	if err != nil {
-		elem, _ = net.contexts.get(string(id))
-
-		return elem.(*Context), nil
-	}
-
-	return ctx, nil
+	return net.routers[ri]
 }
 
 func (net *Hermes) nextReqID() uint64 {
 	return atomic.AddUint64(&net.reqID, 1)
+}
+
+type SendMessage struct {
+	msg     *message
+	replyCh chan error
+}
+
+type ReceiverIdle struct {
+	id ReceiverID
+}
+
+type Router struct {
+	factory    ReceiverFactory
+	net        *Hermes
+	ctx        map[string]*Context
+	idleTimers map[string]*time.Timer
+	cmds       *Mailbox
+}
+
+func newRouter(net *Hermes, factory ReceiverFactory) (*Router, error) {
+	r := &Router{
+		net:        net,
+		factory:    factory,
+		ctx:        make(map[string]*Context),
+		idleTimers: make(map[string]*time.Timer),
+	}
+
+	box, err := newMailbox(r.onMessage)
+	if err != nil {
+		return nil, err
+	}
+
+	r.cmds = box
+
+	return r, nil
+}
+
+func (r *Router) send(msg *message) error {
+	sm := &SendMessage{msg: msg, replyCh: make(chan error, 1)}
+	err := r.cmds.post(&message{payload: sm})
+	if err != nil {
+		return err
+	}
+
+	return <-sm.replyCh
+}
+
+func (r *Router) onMessage(msg Message) {
+	switch msg.Payload().(type) {
+	case *SendMessage:
+		sm := msg.Payload().(*SendMessage)
+		sm.replyCh <- r.onSend(sm.msg)
+
+	case *ReceiverIdle:
+		ri := msg.Payload().(*ReceiverIdle)
+		r.onIdleReceiver(ri.id)
+	}
+}
+
+func (r *Router) onIdleReceiver(id ReceiverID) {
+	ctx, ok := r.ctx[string(id)]
+	if !ok {
+		return
+	}
+
+	if ctx.Stop() {
+		delete(r.ctx, string(id))
+	}
+}
+
+func (r *Router) onSend(msg *message) error {
+	ctx, err := r.context(msg.to)
+	if err != nil {
+		return err
+	}
+
+	tm := r.idleTimers[string(msg.to)]
+	tm.Reset(IdleTimeout)
+
+	return ctx.submit(msg)
+}
+
+func (r *Router) context(id ReceiverID) (*Context, error) {
+	ctx, ok := r.ctx[string(id)]
+	if ok {
+		return ctx, nil
+	}
+
+	recv, err := r.factory(id)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, err = newContext(id, r.net, recv)
+	if err != nil {
+		return nil, err
+	}
+
+	r.ctx[string(id)] = ctx
+
+	t := time.AfterFunc(IdleTimeout, func() {
+		r.onIdleTimeout(ctx)
+	})
+	r.idleTimers[string(id)] = t
+
+	return ctx, nil
+}
+
+func (r *Router) onIdleTimeout(ctx *Context) {
+	r.cmds.post(&message{payload: &ReceiverIdle{id: ctx.id}})
 }
