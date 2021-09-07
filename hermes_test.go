@@ -72,6 +72,52 @@ func TestMessagePassing(t *testing.T) {
 	passMessages(t, net, 1, 5000)
 }
 
+func TestIdleReceiver(t *testing.T) {
+	joined := 0
+	msgs := 0
+
+	net, err := New(func(id ReceiverID) (Receiver, error) {
+		recv := func(ctx *Context, m Message) {
+			switch m.Payload().(type) {
+			case *Joined:
+				joined++
+				msgs++
+
+			case *Ping:
+				msgs++
+				ctx.Reply(m, &Pong{})
+
+			default:
+				msgs++
+			}
+		}
+
+		return recv, nil
+	})
+	if err != nil {
+		t.Fatalf("new actor system failed with error: %s\n", err.Error())
+	}
+
+	err = net.Send("", "r", &Ping{})
+	if err != nil {
+		t.Fatalf("send failed with error: %s\n", err.Error())
+	}
+
+	time.Sleep(DefaultIdleTimeout + 100*time.Millisecond)
+
+	_, err = net.RequestWithTimeout("", "r", &Ping{}, 5000*time.Millisecond)
+	if err != nil {
+		t.Fatalf("send failed with error: %s\n", err.Error())
+	}
+
+	if joined != 2 {
+		t.Fatalf("expected %d joined events but got %d", 2, joined)
+	}
+	if msgs != 4 {
+		t.Fatalf("expected %d events but got %d", 5, msgs)
+	}
+}
+
 func BenchmarkMessagePassing(b *testing.B) {
 	net, err := New(func(id ReceiverID) (Receiver, error) {
 		a := &PongActor{}

@@ -251,8 +251,8 @@ func (m *message) Payload() interface{} {
 }
 
 const (
-	RouterCount = 20
-	IdleTimeout = 5 * time.Second
+	DefaultRouterCount = 20
+	DefaultIdleTimeout = 5 * time.Second
 )
 
 /*
@@ -276,13 +276,13 @@ func New(factory ReceiverFactory) (*Hermes, error) {
 	}
 
 	net := &Hermes{
-		routers: make([]*Router, RouterCount),
+		routers: make([]*Router, DefaultRouterCount),
 		reqs:    newSyncMap(),
 		factory: factory,
 		seed:    maphash.MakeSeed(),
 	}
 
-	for ri := 0; ri < RouterCount; ri++ {
+	for ri := 0; ri < DefaultRouterCount; ri++ {
 		r, err := newRouter(net, factory)
 		if err != nil {
 			return nil, err
@@ -363,7 +363,7 @@ func (net *Hermes) router(key string) *Router {
 
 	hash.SetSeed(net.seed)
 	hash.WriteString(key)
-	ri := int(hash.Sum64() % RouterCount)
+	ri := int(hash.Sum64() % DefaultRouterCount)
 
 	return net.routers[ri]
 }
@@ -447,7 +447,7 @@ func (r *Router) onSend(msg *message) error {
 	}
 
 	tm := r.idleTimers[string(msg.to)]
-	tm.Reset(IdleTimeout)
+	tm.Reset(DefaultIdleTimeout)
 
 	return ctx.submit(msg)
 }
@@ -469,8 +469,9 @@ func (r *Router) context(id ReceiverID) (*Context, error) {
 	}
 
 	r.ctx[string(id)] = ctx
+	ctx.submit(&message{to: ctx.id, payload: &Joined{}})
 
-	t := time.AfterFunc(IdleTimeout, func() {
+	t := time.AfterFunc(DefaultIdleTimeout, func() {
 		r.onIdleTimeout(ctx)
 	})
 	r.idleTimers[string(id)] = t
