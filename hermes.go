@@ -166,6 +166,11 @@ const (
 	ContextProcessing
 )
 
+type Timer interface {
+	Reset(time.Duration) bool
+	Stop() bool
+}
+
 type Context struct {
 	id      ReceiverID
 	net     *Hermes
@@ -203,6 +208,10 @@ func (ctx *Context) Stop() bool {
 	return ctx.mailbox.stop()
 }
 
+func (ctx *Context) ID() ReceiverID {
+	return ctx.id
+}
+
 func (ctx *Context) SetReceiver(recv Receiver) {
 	ctx.recv = recv
 }
@@ -226,6 +235,18 @@ func (ctx *Context) Reply(msg Message, reply interface{}) error {
 	}
 
 	return ctx.net.reply(msg, reply)
+}
+
+func (ctx *Context) Schedule(after time.Duration, msg interface{}) (Timer, error) {
+	if msg == nil {
+		return nil, ErrInvalidMessage
+	}
+
+	t := time.AfterFunc(after, func() {
+		ctx.submit(&message{to: ctx.id, payload: msg})
+	})
+
+	return t, nil
 }
 
 func (ctx *Context) submit(msg Message) error {
@@ -266,7 +287,7 @@ type Hermes struct {
 	reqID   uint64
 	factory ReceiverFactory
 	routers []*Router
-	reqs    *syncMap
+	reqs    *SyncMap
 	seed    maphash.Seed
 }
 
@@ -277,7 +298,7 @@ func New(factory ReceiverFactory) (*Hermes, error) {
 
 	net := &Hermes{
 		routers: make([]*Router, DefaultRouterCount),
-		reqs:    newSyncMap(),
+		reqs:    NewSyncMap(),
 		factory: factory,
 		seed:    maphash.MakeSeed(),
 	}
@@ -307,14 +328,14 @@ func (net *Hermes) Request(from, to ReceiverID, request interface{}) (chan Messa
 		replyCh: make(chan Message, 1),
 	}
 
-	err := net.reqs.put(m.corID, m, false)
+	err := net.reqs.Put(m.corID, m, false)
 	if err != nil {
 		return nil, err
 	}
 
 	err = net.localSend(m)
 	if err != nil {
-		net.reqs.delete(m.corID)
+		net.reqs.Delete(m.corID)
 		return nil, err
 	}
 
@@ -342,7 +363,7 @@ func (net *Hermes) reply(msg Message, reply interface{}) error {
 		return errors.New("invalid_message")
 	}
 
-	req, ok := net.reqs.get(im.corID)
+	req, ok := net.reqs.Get(im.corID)
 	if !ok {
 		return errors.New("invalid_cor-id")
 	}

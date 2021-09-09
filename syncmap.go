@@ -54,36 +54,36 @@ func (seg *syncMapSegment) delete(key string) {
 
 const SyncMapSegments = 64
 
-type syncMap struct {
+type SyncMap struct {
 	seg  []*syncMapSegment
 	seed maphash.Seed
 }
 
-func newSyncMap() *syncMap {
+func NewSyncMap() *SyncMap {
 	seg := make([]*syncMapSegment, SyncMapSegments)
 	for si := 0; si < SyncMapSegments; si++ {
 		seg[si] = newSyncMapSegment()
 	}
 
-	return &syncMap{
+	return &SyncMap{
 		seg:  seg,
 		seed: maphash.MakeSeed(),
 	}
 }
 
-func (m *syncMap) put(key string, value interface{}, overwrite bool) error {
+func (m *SyncMap) Put(key string, value interface{}, overwrite bool) error {
 	return m.segment(key).put(key, value, overwrite, nil)
 }
 
-func (m *syncMap) get(key string) (interface{}, bool) {
+func (m *SyncMap) Get(key string) (interface{}, bool) {
 	return m.segment(key).get(key)
 }
 
-func (m *syncMap) delete(key string) {
+func (m *SyncMap) Delete(key string) {
 	m.segment(key).delete(key)
 }
 
-func (m *syncMap) segment(key string) *syncMapSegment {
+func (m *SyncMap) segment(key string) *syncMapSegment {
 	var hash maphash.Hash
 
 	hash.SetSeed(m.seed)
