@@ -22,7 +22,7 @@ type PongActor struct {
 	count int
 }
 
-func (a *PongActor) receive(ctx *Context, msg Message) {
+func (a *PongActor) receive(ctx Context, msg Message) {
 	switch msg.Payload().(type) {
 	case *SendPingRequest:
 		err := a.onSendPing(ctx, msg)
@@ -33,7 +33,7 @@ func (a *PongActor) receive(ctx *Context, msg Message) {
 	}
 }
 
-func (a *PongActor) onSendPing(ctx *Context, msg Message) error {
+func (a *PongActor) onSendPing(ctx Context, msg Message) error {
 	sp := msg.Payload().(*SendPingRequest)
 
 	reply, err := ctx.RequestWithTimeout(sp.to, &Ping{}, 1500*time.Millisecond)
@@ -48,7 +48,7 @@ func (a *PongActor) onSendPing(ctx *Context, msg Message) error {
 	return nil
 }
 
-func (a *PongActor) onPing(ctx *Context, msg Message) {
+func (a *PongActor) onPing(ctx Context, msg Message) {
 	a.count++
 
 	//fmt.Printf("received ping: %d\n", a.count)
@@ -77,7 +77,7 @@ func TestIdleReceiver(t *testing.T) {
 	msgs := 0
 
 	net, err := New(func(id ReceiverID) (Receiver, error) {
-		recv := func(ctx *Context, m Message) {
+		recv := func(ctx Context, m Message) {
 			switch m.Payload().(type) {
 			case *Joined:
 				joined++

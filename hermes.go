@@ -156,7 +156,7 @@ var ErrInvalidMessage = errors.New("invalid_message")
 
 type ReceiverID string
 
-type Receiver func(ctx *Context, msg Message)
+type Receiver func(ctx Context, msg Message)
 
 type ReceiverFactory func(id ReceiverID) (Receiver, error)
 
@@ -171,14 +171,24 @@ type Timer interface {
 	Stop() bool
 }
 
-type Context struct {
+type Context interface {
+	ID() ReceiverID
+	SetReceiver(Receiver)
+	Send(to ReceiverID, payload interface{}) error
+	Request(to ReceiverID, request interface{}) (chan Message, error)
+	RequestWithTimeout(to ReceiverID, request interface{}, timeout time.Duration) (Message, error)
+	Reply(msg Message, reply interface{}) error
+	Schedule(after time.Duration, msg interface{}) (Timer, error)
+}
+
+type context struct {
 	id      ReceiverID
 	net     *Hermes
 	recv    Receiver
 	mailbox *Mailbox
 }
 
-func newContext(id ReceiverID, net *Hermes, recv Receiver) (*Context, error) {
+func newContext(id ReceiverID, net *Hermes, recv Receiver) (*context, error) {
 	if id == "" {
 		return nil, errors.New("invalid_id")
 	}
@@ -189,7 +199,7 @@ func newContext(id ReceiverID, net *Hermes, recv Receiver) (*Context, error) {
 		return nil, errors.New("invalid_receiver")
 	}
 
-	ctx := &Context{id: id, net: net, recv: recv}
+	ctx := &context{id: id, net: net, recv: recv}
 
 	mb, err := newMailbox(ctx.onProcess)
 	if err != nil {
@@ -200,35 +210,27 @@ func newContext(id ReceiverID, net *Hermes, recv Receiver) (*Context, error) {
 	return ctx, nil
 }
 
-func (ctx *Context) onProcess(msg Message) {
-	ctx.recv(ctx, msg)
-}
-
-func (ctx *Context) Stop() bool {
-	return ctx.mailbox.stop()
-}
-
-func (ctx *Context) ID() ReceiverID {
+func (ctx *context) ID() ReceiverID {
 	return ctx.id
 }
 
-func (ctx *Context) SetReceiver(recv Receiver) {
+func (ctx *context) SetReceiver(recv Receiver) {
 	ctx.recv = recv
 }
 
-func (ctx *Context) Send(to ReceiverID, payload interface{}) error {
+func (ctx *context) Send(to ReceiverID, payload interface{}) error {
 	return ctx.net.Send(ctx.id, to, payload)
 }
 
-func (ctx *Context) Request(to ReceiverID, request interface{}) (chan Message, error) {
+func (ctx *context) Request(to ReceiverID, request interface{}) (chan Message, error) {
 	return ctx.net.Request(ctx.id, to, request)
 }
 
-func (ctx *Context) RequestWithTimeout(to ReceiverID, request interface{}, timeout time.Duration) (Message, error) {
+func (ctx *context) RequestWithTimeout(to ReceiverID, request interface{}, timeout time.Duration) (Message, error) {
 	return ctx.net.RequestWithTimeout(ctx.id, to, request, timeout)
 }
 
-func (ctx *Context) Reply(msg Message, reply interface{}) error {
+func (ctx *context) Reply(msg Message, reply interface{}) error {
 	im := msg.(*message)
 	if im.to != ctx.id {
 		return errors.New("not_the_recipient")
@@ -237,7 +239,7 @@ func (ctx *Context) Reply(msg Message, reply interface{}) error {
 	return ctx.net.reply(msg, reply)
 }
 
-func (ctx *Context) Schedule(after time.Duration, msg interface{}) (Timer, error) {
+func (ctx *context) Schedule(after time.Duration, msg interface{}) (Timer, error) {
 	if msg == nil {
 		return nil, ErrInvalidMessage
 	}
@@ -249,7 +251,15 @@ func (ctx *Context) Schedule(after time.Duration, msg interface{}) (Timer, error
 	return t, nil
 }
 
-func (ctx *Context) submit(msg Message) error {
+func (ctx *context) stop() bool {
+	return ctx.mailbox.stop()
+}
+
+func (ctx *context) onProcess(msg Message) {
+	ctx.recv(ctx, msg)
+}
+
+func (ctx *context) submit(msg Message) error {
 	return ctx.mailbox.post(msg)
 }
 
@@ -405,7 +415,7 @@ type ReceiverIdle struct {
 type Router struct {
 	factory    ReceiverFactory
 	net        *Hermes
-	ctx        map[string]*Context
+	ctx        map[string]*context
 	idleTimers map[string]*time.Timer
 	cmds       *Mailbox
 }
@@ -414,7 +424,7 @@ func newRouter(net *Hermes, factory ReceiverFactory) (*Router, error) {
 	r := &Router{
 		net:        net,
 		factory:    factory,
-		ctx:        make(map[string]*Context),
+		ctx:        make(map[string]*context),
 		idleTimers: make(map[string]*time.Timer),
 	}
 
@@ -456,7 +466,7 @@ func (r *Router) onIdleReceiver(id ReceiverID) {
 		return
 	}
 
-	if ctx.Stop() {
+	if ctx.stop() {
 		delete(r.ctx, string(id))
 	}
 }
@@ -473,7 +483,7 @@ func (r *Router) onSend(msg *message) error {
 	return ctx.submit(msg)
 }
 
-func (r *Router) context(id ReceiverID) (*Context, error) {
+func (r *Router) context(id ReceiverID) (*context, error) {
 	ctx, ok := r.ctx[string(id)]
 	if ok {
 		return ctx, nil
@@ -500,6 +510,6 @@ func (r *Router) context(id ReceiverID) (*Context, error) {
 	return ctx, nil
 }
 
-func (r *Router) onIdleTimeout(ctx *Context) {
+func (r *Router) onIdleTimeout(ctx *context) {
 	r.cmds.post(&message{payload: &ReceiverIdle{id: ctx.id}})
 }

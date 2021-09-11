@@ -16,7 +16,7 @@ type IOTDeviceMeasureResponse struct {
 
 type IOTDevice struct{}
 
-func (device *IOTDevice) receive(ctx *Context, msg Message) {
+func (device *IOTDevice) receive(ctx Context, msg Message) {
 	switch msg.Payload().(type) {
 	case *IOTDeviceMeasureRequest:
 		ctx.Reply(msg, &IOTDeviceMeasureResponse{value: rand.Float32()})
@@ -56,7 +56,7 @@ func newIOTDeviceGroup() *IOTDeviceGroup {
 	return &IOTDeviceGroup{devices: make(map[ReceiverID]bool)}
 }
 
-func (grp *IOTDeviceGroup) receive(ctx *Context, msg Message) {
+func (grp *IOTDeviceGroup) receive(ctx Context, msg Message) {
 	switch msg.Payload().(type) {
 	case *IOTDeviceGroupAddRequest:
 		grp.onAddDevice(ctx, msg)
@@ -66,7 +66,7 @@ func (grp *IOTDeviceGroup) receive(ctx *Context, msg Message) {
 	}
 }
 
-func (grp *IOTDeviceGroup) onAddDevice(ctx *Context, msg Message) {
+func (grp *IOTDeviceGroup) onAddDevice(ctx Context, msg Message) {
 	id := msg.Payload().(*IOTDeviceGroupAddRequest).deviceID
 
 	if id == "" {
@@ -79,7 +79,7 @@ func (grp *IOTDeviceGroup) onAddDevice(ctx *Context, msg Message) {
 	ctx.Reply(msg, &IOTDeviceGroupAddResponse{})
 }
 
-func (grp *IOTDeviceGroup) onMeasure(ctx *Context, msg Message) {
+func (grp *IOTDeviceGroup) onMeasure(ctx Context, msg Message) {
 	values := make([]float32, 0, len(grp.devices))
 	reqChs := make([]chan Message, 0, len(grp.devices))
 
