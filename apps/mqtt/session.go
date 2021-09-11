@@ -49,10 +49,10 @@ type SessionPublishReply struct {
 	err error
 }
 
-type SessionAckPublishRequest struct {
+type SessionPubAckRequest struct {
 	id MqttPacketId
 }
-type SessionAckPublishResponse struct {
+type SessionPubAckReply struct {
 	err error
 }
 
@@ -163,9 +163,9 @@ func (s *Session) recv(ctx hermes.Context, msg hermes.Message) {
 		ctx.Reply(msg, &SessionPublishReply{err: err})
 		s.scheduleProcess(ctx)
 
-	case *SessionAckPublishRequest:
-		err := s.onPubAck(ctx, msg.Payload().(*SessionAckPublishRequest))
-		ctx.Reply(msg, &SessionAckPublishResponse{err: err})
+	case *SessionPubAckRequest:
+		err := s.onPubAck(ctx, msg.Payload().(*SessionPubAckRequest))
+		ctx.Reply(msg, &SessionPubAckReply{err: err})
 		s.scheduleProcess(ctx)
 
 	case *sessionProcessPublishes:
@@ -230,7 +230,7 @@ func (s *Session) onPublish(ctx hermes.Context, msg *MqttPublishMessage) error {
 	return state.append(msg)
 }
 
-func (s *Session) onPubAck(ctx hermes.Context, msg *SessionAckPublishRequest) error {
+func (s *Session) onPubAck(ctx hermes.Context, msg *SessionPubAckRequest) error {
 	sp := s.outbox.Peek().(*SessionPublishMessage)
 	if sp.id != msg.id {
 		return errors.New("invalid_packet_id")
