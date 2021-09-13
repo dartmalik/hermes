@@ -45,10 +45,10 @@ type SessionUnsubscribeReply struct {
 	err error
 }
 
-type SessionStoreMsgRequest struct {
+type SessionPublishRequest struct {
 	msg *MqttPublishMessage
 }
-type SessionStoreMsgReply struct {
+type SessionPublishReply struct {
 	err error
 }
 
@@ -166,14 +166,20 @@ func (s *Session) recv(ctx hermes.Context, msg hermes.Message) {
 		ack := &MqttUnSubAckMessage{PacketId: pid}
 		ctx.Reply(msg, &SessionUnsubscribeReply{ack: ack, err: err})
 
-	case *SessionStoreMsgRequest:
-		err := s.onStoreMessage(ctx, msg.Payload().(*SessionStoreMsgRequest))
-		ctx.Reply(msg, &SessionStoreMsgReply{err: err})
-		s.scheduleProcess(ctx)
+	case *SessionPublishRequest:
+		err := s.onPublishMessage(ctx, msg.Payload().(*SessionPublishRequest))
+		ctx.Reply(msg, &SessionPublishReply{err: err})
 
 	case *SessionPubAckRequest:
 		err := s.onPubAck(ctx, msg.Payload().(*SessionPubAckRequest))
 		ctx.Reply(msg, &SessionPubAckReply{err: err})
+		s.scheduleProcess(ctx)
+
+	case *PubSubMessagePublished:
+		err := s.onStoreMessage(ctx, msg.Payload().(*PubSubMessagePublished).msg)
+		if err != nil {
+			fmt.Printf("failed to store message: %s\n", err.Error())
+		}
 		s.scheduleProcess(ctx)
 
 	case *sessionProcessPublishes:
@@ -214,12 +220,12 @@ func (s *Session) onSubscribe(ctx hermes.Context, msg *MqttSubscribeMessage) (Mq
 	}
 
 	topics := s.topicNames(msg.topicFilter())
-	req := &PubsubSubscribeRequest{SubscriberID: ctx.ID(), Topics: topics}
+	req := &PubSubSubscribeRequest{SubscriberID: ctx.ID(), Topics: topics}
 	rm, err := ctx.RequestWithTimeout(PubSubID(), req, 1500*time.Millisecond)
 	if err != nil {
 		return 0, nil, err
 	}
-	rep := rm.Payload().(*PubsubSubscribeReply)
+	rep := rm.Payload().(*PubSubSubscribeReply)
 	if rep.err != nil {
 		return 0, nil, rep.err
 	}
@@ -237,12 +243,12 @@ func (s *Session) onUnsubscribe(ctx hermes.Context, msg *MqttUnsubscribeMessage)
 	}
 
 	topics := s.topicNames(msg.TopicFilters)
-	req := &PubsubUnsubscribeRequest{SubscriberID: ctx.ID(), Topics: topics}
+	req := &PubSubUnsubscribeRequest{SubscriberID: ctx.ID(), Topics: topics}
 	rm, err := ctx.RequestWithTimeout(PubSubID(), req, 1500*time.Millisecond)
 	if err != nil {
 		return 0, err
 	}
-	rep := rm.Payload().(*PubsubUnsubscribeReply)
+	rep := rm.Payload().(*PubSubUnsubscribeReply)
 	if rep.err != nil {
 		return 0, rep.err
 	}
@@ -254,14 +260,32 @@ func (s *Session) onUnsubscribe(ctx hermes.Context, msg *MqttUnsubscribeMessage)
 	return msg.PacketId, nil
 }
 
-func (s *Session) onStoreMessage(ctx hermes.Context, req *SessionStoreMsgRequest) error {
+func (s *Session) onPublishMessage(ctx hermes.Context, req *SessionPublishRequest) error {
 	if req.msg == nil {
+		return errors.New("invalid_message")
+	}
+
+	rm, err := ctx.RequestWithTimeout(PubSubID(), &PubSubPublishRequest{msg: req.msg}, 1500*time.Millisecond)
+	if err != nil {
+		return err
+	}
+
+	rep := rm.Payload().(*PubSubPublishReply)
+	if rep.err != nil {
+		return rep.err
+	}
+
+	return nil
+}
+
+func (s *Session) onStoreMessage(ctx hermes.Context, msg *MqttPublishMessage) error {
+	if msg == nil {
 		return errors.New("invalid_message")
 	}
 
 	state, _ := s.getState()
 
-	return state.append(req.msg)
+	return state.append(msg)
 }
 
 func (s *Session) onPubAck(ctx hermes.Context, msg *SessionPubAckRequest) error {

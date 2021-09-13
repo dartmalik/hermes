@@ -153,7 +153,7 @@ func testConsumerRegister(t *testing.T, ctx *TestContext, s *Session, cid hermes
 
 func testSubscribeTopic(t *testing.T, ctx *TestContext, s *Session, topic MqttTopicName) {
 	ctx.onRequestWithTimeout = func(ri hermes.ReceiverID, i interface{}, d time.Duration) (hermes.Message, error) {
-		return messageOf(&PubsubSubscribeReply{}), nil
+		return messageOf(&PubSubSubscribeReply{}), nil
 	}
 
 	replied := false
@@ -180,20 +180,6 @@ func testSubscribeTopic(t *testing.T, ctx *TestContext, s *Session, topic MqttTo
 }
 
 func testPublishMessage(t *testing.T, ctx *TestContext, s *Session, topic MqttTopicName, payload string) {
-	replied := false
-	ctx.onReply = func(m hermes.Message, i interface{}) error {
-		r, ok := i.(*SessionStoreMsgReply)
-		if !ok {
-			t.Fatalf("expected reply of type SessionPublishReply")
-		}
-		if r.err != nil {
-			t.Fatalf("publish failed with error: %s \n", r.err.Error())
-		}
-
-		replied = true
-
-		return nil
-	}
 
 	sent := false
 	ctx.onSend = func(ri hermes.ReceiverID, i interface{}) error {
@@ -205,11 +191,8 @@ func testPublishMessage(t *testing.T, ctx *TestContext, s *Session, topic MqttTo
 	}
 
 	pub := &MqttPublishMessage{TopicName: topic, PacketId: 1, Payload: []byte(payload)}
-	s.recv(ctx, messageOf(&SessionStoreMsgRequest{msg: pub}))
+	s.recv(ctx, messageOf(&PubSubMessagePublished{msg: pub}))
 
-	if !replied {
-		t.Fatalf("expected session to reply to message publish")
-	}
 	if !sent {
 		t.Fatalf("expected session to send itself a process message")
 	}
