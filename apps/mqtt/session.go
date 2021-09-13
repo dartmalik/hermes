@@ -45,8 +45,30 @@ type SessionUnsubscribeReply struct {
 	err error
 }
 
-type SessionPublishReply struct {
+type SessionStoreMsgRequest struct {
+	msg *MqttPublishMessage
+}
+type SessionStoreMsgReply struct {
 	err error
+}
+
+type SessionPublishMessage struct {
+	id     MqttPacketId
+	msg    *MqttPublishMessage
+	sentAt time.Time
+}
+
+func (msg *SessionPublishMessage) hasTimeout() bool {
+	return msg.sentAt.Add(SessionPublishTimeout).Before(time.Now())
+}
+
+func (msg *SessionPublishMessage) timeout() time.Duration {
+	t := time.Until(msg.sentAt.Add(SessionPublishTimeout))
+	if t < 0 {
+		return 0
+	}
+
+	return t
 }
 
 type SessionPubAckRequest struct {
@@ -94,8 +116,8 @@ func (state *SessionState) unsubscribe(filters []MqttTopicFilter) {
 }
 
 func (state *SessionState) append(msg *MqttPublishMessage) error {
-	for f := range state.sub {
-		if f.topicName() == msg.TopicName {
+	for s := range state.sub {
+		if s.topicName() == msg.TopicName {
 			_, err := state.pub.Add(msg)
 			if err != nil {
 				return err
@@ -104,25 +126,6 @@ func (state *SessionState) append(msg *MqttPublishMessage) error {
 	}
 
 	return nil
-}
-
-type SessionPublishMessage struct {
-	id     MqttPacketId
-	msg    *MqttPublishMessage
-	sentAt time.Time
-}
-
-func (msg *SessionPublishMessage) hasTimeout() bool {
-	return msg.sentAt.Add(SessionPublishTimeout).Before(time.Now())
-}
-
-func (msg *SessionPublishMessage) timeout() time.Duration {
-	t := time.Until(msg.sentAt.Add(SessionPublishTimeout))
-	if t < 0 {
-		return 0
-	}
-
-	return t
 }
 
 type Session struct {
@@ -158,9 +161,9 @@ func (s *Session) recv(ctx hermes.Context, msg hermes.Message) {
 		ack := &MqttUnSubAckMessage{PacketId: pid}
 		ctx.Reply(msg, &SessionUnsubscribeReply{ack: ack, err: err})
 
-	case *MqttPublishMessage:
-		err := s.onPublish(ctx, msg.Payload().(*MqttPublishMessage))
-		ctx.Reply(msg, &SessionPublishReply{err: err})
+	case *SessionStoreMsgRequest:
+		err := s.onStoreMessage(ctx, msg.Payload().(*SessionStoreMsgRequest))
+		ctx.Reply(msg, &SessionStoreMsgReply{err: err})
 		s.scheduleProcess(ctx)
 
 	case *SessionPubAckRequest:
@@ -224,10 +227,14 @@ func (s *Session) onUnsubscribe(ctx hermes.Context, msg *MqttUnsubscribeMessage)
 	return msg.PacketId, nil
 }
 
-func (s *Session) onPublish(ctx hermes.Context, msg *MqttPublishMessage) error {
+func (s *Session) onStoreMessage(ctx hermes.Context, req *SessionStoreMsgRequest) error {
+	if req.msg == nil {
+		return errors.New("invalid_message")
+	}
+
 	state, _ := s.getState()
 
-	return state.append(msg)
+	return state.append(req.msg)
 }
 
 func (s *Session) onPubAck(ctx hermes.Context, msg *SessionPubAckRequest) error {

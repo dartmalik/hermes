@@ -175,10 +175,10 @@ func testSubscribeTopic(t *testing.T, ctx *TestContext, s *Session, topic MqttTo
 	}
 }
 
-func testPublishMessage(t *testing.T, ctx *TestContext, s *Session, topic MqttTopicName, pub string) {
+func testPublishMessage(t *testing.T, ctx *TestContext, s *Session, topic MqttTopicName, payload string) {
 	replied := false
 	ctx.onReply = func(m hermes.Message, i interface{}) error {
-		r, ok := i.(*SessionPublishReply)
+		r, ok := i.(*SessionStoreMsgReply)
 		if !ok {
 			t.Fatalf("expected reply of type SessionPublishReply")
 		}
@@ -199,7 +199,9 @@ func testPublishMessage(t *testing.T, ctx *TestContext, s *Session, topic MqttTo
 		sent = true
 		return nil
 	}
-	s.recv(ctx, messageOf(&MqttPublishMessage{TopicName: topic, PacketId: 1, Payload: []byte(pub)}))
+
+	pub := &MqttPublishMessage{TopicName: topic, PacketId: 1, Payload: []byte(payload)}
+	s.recv(ctx, messageOf(&SessionStoreMsgRequest{msg: pub}))
 
 	if !replied {
 		t.Fatalf("expected session to reply to message publish")
