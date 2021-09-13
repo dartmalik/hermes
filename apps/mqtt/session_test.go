@@ -214,10 +214,12 @@ func testPublishMessage(t *testing.T, ctx *TestContext, s *Session, topic MqttTo
 func testPublishProcess(t *testing.T, ctx *TestContext, s *Session, topic MqttTopicName, pub string) {
 	sent := false
 	ctx.onSend = func(ri hermes.ReceiverID, i interface{}) error {
-		m, ok := i.(*SessionPublishMessage)
+		smp, ok := i.(*SessionMessagePublished)
 		if !ok {
 			t.Fatalf("expected message of type publish")
 		}
+
+		m := smp.msg
 		if m.msg.TopicName != topic {
 			t.Fatalf("expected message to be published to %s but got %s", topic, m.msg.TopicName)
 		}

@@ -52,30 +52,16 @@ type SessionStoreMsgReply struct {
 	err error
 }
 
-type SessionPublishMessage struct {
-	id     MqttPacketId
-	msg    *MqttPublishMessage
-	sentAt time.Time
-}
-
-func (msg *SessionPublishMessage) hasTimeout() bool {
-	return msg.sentAt.Add(SessionPublishTimeout).Before(time.Now())
-}
-
-func (msg *SessionPublishMessage) timeout() time.Duration {
-	t := time.Until(msg.sentAt.Add(SessionPublishTimeout))
-	if t < 0 {
-		return 0
-	}
-
-	return t
-}
-
 type SessionPubAckRequest struct {
 	id MqttPacketId
 }
 type SessionPubAckReply struct {
 	err error
+}
+
+// events
+type SessionMessagePublished struct {
+	msg *SessionMessage
 }
 
 type sessionProcessPublishes struct{}
@@ -126,6 +112,25 @@ func (state *SessionState) append(msg *MqttPublishMessage) error {
 	}
 
 	return nil
+}
+
+type SessionMessage struct {
+	id     MqttPacketId
+	msg    *MqttPublishMessage
+	sentAt time.Time
+}
+
+func (msg *SessionMessage) hasTimeout() bool {
+	return msg.sentAt.Add(SessionPublishTimeout).Before(time.Now())
+}
+
+func (msg *SessionMessage) timeout() time.Duration {
+	t := time.Until(msg.sentAt.Add(SessionPublishTimeout))
+	if t < 0 {
+		return 0
+	}
+
+	return t
 }
 
 type Session struct {
@@ -238,7 +243,7 @@ func (s *Session) onStoreMessage(ctx hermes.Context, req *SessionStoreMsgRequest
 }
 
 func (s *Session) onPubAck(ctx hermes.Context, msg *SessionPubAckRequest) error {
-	sp := s.outbox.Peek().(*SessionPublishMessage)
+	sp := s.outbox.Peek().(*SessionMessage)
 	if sp.id != msg.id {
 		return errors.New("invalid_packet_id")
 	}
@@ -265,17 +270,17 @@ func (s *Session) processPublishQueue(ctx hermes.Context) {
 
 	for mi := 0; mi < cap && state.pub.Size() > 0; mi++ {
 		pub := state.pub.Remove().(*MqttPublishMessage)
-		sp := &SessionPublishMessage{msg: pub, id: s.nextPacketId(), sentAt: time.Now()}
-		s.outbox.Add(sp)
-		ctx.Send(s.consumer, sp)
+		sm := &SessionMessage{msg: pub, id: s.nextPacketId(), sentAt: time.Now()}
+		s.outbox.Add(sm)
+		ctx.Send(s.consumer, &SessionMessagePublished{msg: sm})
 	}
 }
 
 func (s *Session) processOutbox(ctx hermes.Context) {
-	sp := s.outbox.Peek().(*SessionPublishMessage)
-	if sp.hasTimeout() {
-		sp.sentAt = time.Now()
-		ctx.Send(s.consumer, sp)
+	msg := s.outbox.Peek().(*SessionMessage)
+	if msg.hasTimeout() {
+		msg.sentAt = time.Now()
+		ctx.Send(s.consumer, &SessionMessagePublished{msg: msg})
 	}
 
 	s.scheduleRepublish(ctx)
@@ -284,7 +289,7 @@ func (s *Session) processOutbox(ctx hermes.Context) {
 func (s *Session) scheduleRepublish(ctx hermes.Context) {
 	if s.repubTimer != nil {
 		if s.outbox.Size() > 0 {
-			sp := s.outbox.Peek().(*SessionPublishMessage)
+			sp := s.outbox.Peek().(*SessionMessage)
 			s.repubTimer.Reset(sp.timeout())
 		}
 		return
