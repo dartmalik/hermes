@@ -213,6 +213,17 @@ func (s *Session) onSubscribe(ctx hermes.Context, msg *MqttSubscribeMessage) (Mq
 		return 0, nil, errors.New("missing_subscriptions")
 	}
 
+	topics := s.topicNames(msg.topicFilter())
+	req := &PubsubSubscribeRequest{SubscriberID: ctx.ID(), Topics: topics}
+	rm, err := ctx.RequestWithTimeout(PubSubID(), req, 1500*time.Millisecond)
+	if err != nil {
+		return 0, nil, err
+	}
+	rep := rm.Payload().(*PubsubSubscribeReply)
+	if rep.err != nil {
+		return 0, nil, rep.err
+	}
+
 	state, _ := s.getState()
 
 	codes, err := state.subscribe(msg)
@@ -223,6 +234,17 @@ func (s *Session) onSubscribe(ctx hermes.Context, msg *MqttSubscribeMessage) (Mq
 func (s *Session) onUnsubscribe(ctx hermes.Context, msg *MqttUnsubscribeMessage) (MqttPacketId, error) {
 	if msg.TopicFilters == nil || len(msg.TopicFilters) <= 0 {
 		return 0, errors.New("missing_filters")
+	}
+
+	topics := s.topicNames(msg.TopicFilters)
+	req := &PubsubUnsubscribeRequest{SubscriberID: ctx.ID(), Topics: topics}
+	rm, err := ctx.RequestWithTimeout(PubSubID(), req, 1500*time.Millisecond)
+	if err != nil {
+		return 0, err
+	}
+	rep := rm.Payload().(*PubsubUnsubscribeReply)
+	if rep.err != nil {
+		return 0, rep.err
 	}
 
 	state, _ := s.getState()
@@ -343,4 +365,13 @@ func (s *Session) nextPacketId() MqttPacketId {
 	}
 
 	return s.packetId
+}
+
+func (s *Session) topicNames(filters []MqttTopicFilter) []MqttTopicName {
+	topics := make([]MqttTopicName, 0, len(filters))
+	for _, f := range filters {
+		topics = append(topics, f.topicName())
+	}
+
+	return topics
 }

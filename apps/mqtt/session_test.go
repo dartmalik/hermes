@@ -152,6 +152,10 @@ func testConsumerRegister(t *testing.T, ctx *TestContext, s *Session, cid hermes
 }
 
 func testSubscribeTopic(t *testing.T, ctx *TestContext, s *Session, topic MqttTopicName) {
+	ctx.onRequestWithTimeout = func(ri hermes.ReceiverID, i interface{}, d time.Duration) (hermes.Message, error) {
+		return messageOf(&PubsubSubscribeReply{}), nil
+	}
+
 	replied := false
 	ctx.onReply = func(m hermes.Message, i interface{}) error {
 		r, ok := i.(*SessionSubscribeReply)
