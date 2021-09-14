@@ -6,6 +6,10 @@ import (
 	"github.com/dartali/hermes"
 )
 
+func IsPubSubID(id hermes.ReceiverID) bool {
+	return string(id) == "/pubsub"
+}
+
 func PubSubID() hermes.ReceiverID {
 	return hermes.ReceiverID("/pubsub")
 }
@@ -39,6 +43,10 @@ type PubSubMessagePublished struct {
 
 type PubSub struct {
 	sub map[MqttTopicName]map[hermes.ReceiverID]bool
+}
+
+func NewPubSub() *PubSub {
+	return &PubSub{sub: make(map[MqttTopicName]map[hermes.ReceiverID]bool)}
 }
 
 func (ps *PubSub) recv(ctx hermes.Context, msg hermes.Message) {

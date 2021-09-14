@@ -115,10 +115,10 @@ func testConsumerRegister(t *testing.T, ctx *TestContext, s *Session, cid hermes
 		if !ok {
 			t.Fatalf("expected message of type SessionRegisterReply")
 		}
-		if cid != "" && res.err != nil {
-			t.Fatalf("register failed with error: %s\n", res.err.Error())
+		if cid != "" && res.Err != nil {
+			t.Fatalf("register failed with error: %s\n", res.Err.Error())
 		}
-		if cid == "" && res.err == nil {
+		if cid == "" && res.Err == nil {
 			t.Fatalf("session should have replied with error")
 		}
 
@@ -162,8 +162,8 @@ func testSubscribeTopic(t *testing.T, ctx *TestContext, s *Session, topic MqttTo
 		if !ok {
 			t.Fatalf("expected session subscribe reply")
 		}
-		if r.err != nil {
-			t.Fatalf("subscribe failed with error: %s\n", r.err.Error())
+		if r.Err != nil {
+			t.Fatalf("subscribe failed with error: %s\n", r.Err.Error())
 		}
 
 		replied = true
