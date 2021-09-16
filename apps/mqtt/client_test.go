@@ -33,20 +33,18 @@ func TestClientConnect(t *testing.T) {
 	testConnect(t, net, cid, end)
 }
 
-func TestPubSub(t *testing.T) {
+func TestPubSubQoS0(t *testing.T) {
 	net := createNet(t)
 	topic := MqttTopicFilter("test")
-
 	c1 := MqttClientId("c1")
-	e1 := testSetEndpoint(t, net, c1)
-	testConnect(t, net, c1, e1)
-
 	c2 := MqttClientId("c2")
-	e2 := testSetEndpoint(t, net, c2)
-	testConnect(t, net, c2, e2)
+
+	testConnectClient(t, net, c1)
+
+	e2 := testConnectClient(t, net, c2)
 	testSubscribe(t, net, c2, e2, topic)
 
-	published := false
+	published := make(chan bool, 1)
 	e2.onWrite = func(msg interface{}) {
 		pub, ok := msg.(*SessionMessage)
 		if !ok {
@@ -56,14 +54,18 @@ func TestPubSub(t *testing.T) {
 			t.Fatalf("invalid publish payload")
 		}
 
-		published = true
+		published <- true
 	}
-	testPublish(t, net, c1, e1, topic.topicName(), "test")
+	testPublish(t, net, c1, topic.topicName(), "test")
 
-	time.Sleep(1500 * time.Millisecond)
-	if !published {
-		t.Fatalf("expected message to be published")
-	}
+	wait(t, published, "expected message to be published")
+}
+
+func testConnectClient(t *testing.T, net *hermes.Hermes, cid MqttClientId) *TestEndpoint {
+	e1 := testSetEndpoint(t, net, cid)
+	testConnect(t, net, cid, e1)
+
+	return e1
 }
 
 func testSetEndpoint(t *testing.T, net *hermes.Hermes, cid MqttClientId) *TestEndpoint {
@@ -77,7 +79,7 @@ func testSetEndpoint(t *testing.T, net *hermes.Hermes, cid MqttClientId) *TestEn
 }
 
 func testConnect(t *testing.T, net *hermes.Hermes, cid MqttClientId, end *TestEndpoint) {
-	gotAck := false
+	gotAck := make(chan bool, 1)
 	end.onWrite = func(mi interface{}) {
 		msg, ok := mi.(*MqttConnAckMessage)
 		if !ok {
@@ -92,7 +94,7 @@ func testConnect(t *testing.T, net *hermes.Hermes, cid MqttClientId, end *TestEn
 			t.Fatalf("expected the code = accepted")
 		}
 
-		gotAck = true
+		gotAck <- true
 	}
 
 	conn := createConnect(cid)
@@ -101,16 +103,12 @@ func testConnect(t *testing.T, net *hermes.Hermes, cid MqttClientId, end *TestEn
 		t.Fatalf("failed to send connect to client: %s\n", err.Error())
 	}
 
-	time.Sleep(1500 * time.Millisecond)
-
-	if !gotAck {
-		t.Fatalf("expected connect to be ack'd")
-	}
+	wait(t, gotAck, "expected connect to be ack'd")
 }
 
 func testSubscribe(t *testing.T, net *hermes.Hermes, cid MqttClientId, end *TestEndpoint, topic MqttTopicFilter) {
 	pid := MqttPacketId(1223)
-	gotAck := false
+	gotAck := make(chan bool, 1)
 	end.onWrite = func(msg interface{}) {
 		ack, ok := msg.(*MqttSubAckMessage)
 		if !ok {
@@ -125,7 +123,7 @@ func testSubscribe(t *testing.T, net *hermes.Hermes, cid MqttClientId, end *Test
 			t.Fatalf("subscribe failed")
 		}
 
-		gotAck = true
+		gotAck <- true
 	}
 
 	sub := createSubscribe(pid, topic)
@@ -134,13 +132,10 @@ func testSubscribe(t *testing.T, net *hermes.Hermes, cid MqttClientId, end *Test
 		t.Fatalf("failed to subscribe to topic: %s\n", err.Error())
 	}
 
-	time.Sleep(1500 * time.Millisecond)
-	if !gotAck {
-		t.Fatalf("expected to receive ack")
-	}
+	wait(t, gotAck, "expected to receive subscribe ack")
 }
 
-func testPublish(t *testing.T, net *hermes.Hermes, cid MqttClientId, end *TestEndpoint, topic MqttTopicName, payload string) {
+func testPublish(t *testing.T, net *hermes.Hermes, cid MqttClientId, topic MqttTopicName, payload string) {
 	pid := MqttPacketId(33455)
 	pub := &MqttPublishMessage{TopicName: topic, Payload: []byte(payload), PacketId: pid, QosLevel: MqttQoSLevel0}
 	err := net.Send("", clientID(cid), pub)
@@ -181,4 +176,13 @@ func createNet(t *testing.T) *hermes.Hermes {
 	}
 
 	return net
+}
+
+func wait(t *testing.T, ch chan bool, err string) {
+	select {
+	case <-ch:
+
+	case <-time.After(1500 * time.Millisecond):
+		t.Fatal(err)
+	}
 }
