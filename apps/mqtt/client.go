@@ -41,7 +41,6 @@ type ClientConnectRecvFailed struct{}
 
 type Client struct {
 	id             MqttClientId
-	user           string
 	endpoint       Endpoint
 	conTimeout     hermes.Timer
 	keepaliveTimer hermes.Timer
