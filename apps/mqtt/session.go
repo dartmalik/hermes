@@ -345,12 +345,18 @@ func (s *Session) processPublishQueue(ctx hermes.Context) {
 		sm := state.pub.Remove().(*SessionMessage)
 		sm.id = s.nextPacketId()
 		sm.sentAt = time.Now()
-		s.outbox.Add(sm)
+		if sm.qos != MqttQoSLevel0 {
+			s.outbox.Add(sm)
+		}
 		ctx.Send(s.consumer, &SessionMessagePublished{msg: sm})
 	}
 }
 
 func (s *Session) processOutbox(ctx hermes.Context) {
+	if s.outbox.Size() <= 0 {
+		return
+	}
+
 	msg := s.outbox.Peek().(*SessionMessage)
 	if msg.hasTimeout() {
 		msg.sentAt = time.Now()
