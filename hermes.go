@@ -100,6 +100,12 @@ func (q *Queue) Size() int {
 	return len(q.elements)
 }
 
+const (
+	MailboxIdle = iota
+	MailboxProcessing
+	MailboxStopped
+)
+
 type Mailbox struct {
 	msgs      *Queue
 	onProcess func(Message)
@@ -111,11 +117,11 @@ func newMailbox(onProcess func(Message)) (*Mailbox, error) {
 		return nil, errors.New("invalid_process_cb")
 	}
 
-	return &Mailbox{msgs: NewQueue(), onProcess: onProcess, state: ContextIdle}, nil
+	return &Mailbox{msgs: NewQueue(), onProcess: onProcess, state: MailboxIdle}, nil
 }
 
 func (box *Mailbox) stop() bool {
-	return atomic.CompareAndSwapInt32(&box.state, ContextIdle, ContextStopped)
+	return atomic.CompareAndSwapInt32(&box.state, MailboxIdle, MailboxStopped)
 }
 
 func (box *Mailbox) post(msg Message) error {
@@ -128,7 +134,7 @@ func (box *Mailbox) post(msg Message) error {
 		return err
 	}
 
-	if atomic.CompareAndSwapInt32(&box.state, ContextIdle, ContextProcessing) {
+	if atomic.CompareAndSwapInt32(&box.state, MailboxIdle, MailboxProcessing) {
 		go box.process()
 	}
 
@@ -139,7 +145,7 @@ func (box *Mailbox) process() {
 	box.processMessages()
 
 	for box.msgs.Size() > 0 &&
-		atomic.CompareAndSwapInt32(&box.state, ContextIdle, ContextProcessing) {
+		atomic.CompareAndSwapInt32(&box.state, MailboxIdle, MailboxProcessing) {
 		box.processMessages()
 	}
 }
@@ -149,7 +155,7 @@ func (box *Mailbox) processMessages() {
 		box.onProcess(e.(Message))
 		e = box.msgs.RemoveAndPeek()
 	}
-	atomic.CompareAndSwapInt32(&box.state, ContextProcessing, ContextIdle)
+	atomic.CompareAndSwapInt32(&box.state, MailboxProcessing, MailboxIdle)
 }
 
 var ErrInvalidMessage = errors.New("invalid_message")
@@ -159,12 +165,6 @@ type ReceiverID string
 type Receiver func(ctx Context, msg Message)
 
 type ReceiverFactory func(id ReceiverID) (Receiver, error)
-
-const (
-	ContextStopped = iota
-	ContextIdle
-	ContextProcessing
-)
 
 type Timer interface {
 	Reset(time.Duration) bool
@@ -283,7 +283,7 @@ func (m *message) Payload() interface{} {
 
 const (
 	DefaultRouterCount = 20
-	DefaultIdleTimeout = 5 * time.Second
+	DefaultIdleTimeout = 5 * 60 * time.Second
 )
 
 /*
