@@ -109,9 +109,10 @@ func (state *SessionState) unsubscribe(filters []MqttTopicFilter) {
 }
 
 func (state *SessionState) append(msg *MqttPublishMessage) error {
-	for s := range state.sub {
-		if s.topicName() == msg.TopicName {
-			_, err := state.pub.Add(msg)
+	for _, s := range state.sub {
+		if s.TopicFilter.topicName() == msg.TopicName {
+			sm := &SessionMessage{msg: msg, qos: s.QosLevel}
+			_, err := state.pub.Add(sm)
 			if err != nil {
 				return err
 			}
@@ -128,6 +129,7 @@ func (state *SessionState) clean() {
 
 type SessionMessage struct {
 	id     MqttPacketId
+	qos    MqttQoSLevel
 	msg    *MqttPublishMessage
 	sentAt time.Time
 }
@@ -340,8 +342,9 @@ func (s *Session) processPublishQueue(ctx hermes.Context) {
 	cap := SessionMaxOutboxSize - s.outbox.Size()
 
 	for mi := 0; mi < cap && state.pub.Size() > 0; mi++ {
-		pub := state.pub.Remove().(*MqttPublishMessage)
-		sm := &SessionMessage{msg: pub, id: s.nextPacketId(), sentAt: time.Now()}
+		sm := state.pub.Remove().(*SessionMessage)
+		sm.id = s.nextPacketId()
+		sm.sentAt = time.Now()
 		s.outbox.Add(sm)
 		ctx.Send(s.consumer, &SessionMessagePublished{msg: sm})
 	}
