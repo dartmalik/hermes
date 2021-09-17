@@ -8,6 +8,26 @@ import (
 	"github.com/dartali/hermes"
 )
 
+func TestClientConnect(t *testing.T) {
+	net := createNet(t)
+
+	NewTestClient(MqttClientId("c1"), t, net).Init()
+}
+
+func TestPubSubQoS0(t *testing.T) {
+	payload := "m1"
+	topic := MqttTopicFilter("test")
+	net := createNet(t)
+	c1 := NewTestClient(MqttClientId("c1"), t, net).Init()
+	c2 := NewTestClient(MqttClientId("c2"), t, net).Init()
+
+	c2.Subscribe(topic)
+
+	published := c2.AssertMessageReceived(topic.topicName(), payload)
+	c1.Publish(topic.topicName(), payload, MqttQoSLevel0)
+	wait(t, published, "expected message to be published")
+}
+
 type TestEndpoint struct {
 	onWrite func(msg interface{})
 	onClose func()
@@ -26,122 +46,116 @@ func (end *TestEndpoint) Close() {
 	end.onClose()
 }
 
-func TestClientConnect(t *testing.T) {
-	net := createNet(t)
-	cid := MqttClientId("c1")
-	end := testSetEndpoint(t, net, cid)
-	testConnect(t, net, cid, end)
+type TestClient struct {
+	id  MqttClientId
+	t   *testing.T
+	net *hermes.Hermes
+	end *TestEndpoint
 }
 
-func TestPubSubQoS0(t *testing.T) {
-	net := createNet(t)
-	topic := MqttTopicFilter("test")
-	c1 := MqttClientId("c1")
-	c2 := MqttClientId("c2")
+func NewTestClient(id MqttClientId, t *testing.T, net *hermes.Hermes) *TestClient {
+	return &TestClient{id: id, t: t, net: net}
+}
 
-	testConnectClient(t, net, c1)
+func (tc *TestClient) Init() *TestClient {
+	tc.createEndpoint()
+	tc.connect()
 
-	e2 := testConnectClient(t, net, c2)
-	testSubscribe(t, net, c2, e2, topic)
+	return tc
+}
 
+func (tc *TestClient) Subscribe(filter MqttTopicFilter) {
+	pid := MqttPacketId(1223)
+	gotAck := make(chan bool, 1)
+	tc.end.onWrite = func(msg interface{}) {
+		ack, ok := msg.(*MqttSubAckMessage)
+		if !ok {
+			tc.t.Fatalf("expected subscribe ack")
+		}
+
+		if ack.PacketId != pid {
+			tc.t.Fatalf("invalid suback packet id")
+		}
+
+		if ack.ReturnCodes[0] == MqttSubAckFailure {
+			tc.t.Fatalf("subscribe failed")
+		}
+
+		gotAck <- true
+	}
+
+	sub := createSubscribe(pid, filter)
+	err := tc.net.Send("", clientID(tc.id), sub)
+	if err != nil {
+		tc.t.Fatalf("failed to subscribe to topic: %s\n", err.Error())
+	}
+
+	wait(tc.t, gotAck, "expected to receive subscribe ack")
+}
+
+func (tc *TestClient) Publish(topic MqttTopicName, payload string, qos MqttQoSLevel) {
+	pid := MqttPacketId(33455)
+	pub := &MqttPublishMessage{TopicName: topic, Payload: []byte(payload), PacketId: pid, QosLevel: qos}
+	err := tc.net.Send("", clientID(tc.id), pub)
+	if err != nil {
+		tc.t.Fatalf("failed to publish message: %s\n", err.Error())
+	}
+}
+
+func (tc *TestClient) AssertMessageReceived(topic MqttTopicName, payload string) chan bool {
 	published := make(chan bool, 1)
-	e2.onWrite = func(msg interface{}) {
+
+	tc.end.onWrite = func(msg interface{}) {
 		pub, ok := msg.(*SessionMessage)
 		if !ok {
-			t.Fatalf("expected message to be published")
+			tc.t.Fatalf("expected message to be published")
 		}
-		if string(pub.msg.Payload) != "test" {
-			t.Fatalf("invalid publish payload")
+		if string(pub.msg.Payload) != payload {
+			tc.t.Fatalf("invalid publish payload")
 		}
 
 		published <- true
 	}
-	testPublish(t, net, c1, topic.topicName(), "test")
 
-	wait(t, published, "expected message to be published")
+	return published
 }
 
-func testConnectClient(t *testing.T, net *hermes.Hermes, cid MqttClientId) *TestEndpoint {
-	e1 := testSetEndpoint(t, net, cid)
-	testConnect(t, net, cid, e1)
-
-	return e1
-}
-
-func testSetEndpoint(t *testing.T, net *hermes.Hermes, cid MqttClientId) *TestEndpoint {
+func (tc *TestClient) createEndpoint() {
 	end := &TestEndpoint{}
-	err := net.Send("", clientID(cid), &ClientEndpointCreated{endpoint: end})
+	err := tc.net.Send("", clientID(tc.id), &ClientEndpointCreated{endpoint: end})
 	if err != nil {
-		t.Fatalf("failed to set endpoint: %s \n", err.Error())
+		tc.t.Fatalf("failed to set endpoint: %s \n", err.Error())
 	}
 
-	return end
+	tc.end = end
 }
 
-func testConnect(t *testing.T, net *hermes.Hermes, cid MqttClientId, end *TestEndpoint) {
+func (tc *TestClient) connect() {
 	gotAck := make(chan bool, 1)
-	end.onWrite = func(mi interface{}) {
+	tc.end.onWrite = func(mi interface{}) {
 		msg, ok := mi.(*MqttConnAckMessage)
 		if !ok {
-			t.Fatalf("expected a connack message")
+			tc.t.Fatalf("expected a connack message")
 		}
 
 		if msg.SessionPresent() {
-			t.Fatalf("did not expect the session to be present")
+			tc.t.Fatalf("did not expect the session to be present")
 		}
 
 		if msg.code != MqttConnackCodeAccepted {
-			t.Fatalf("expected the code = accepted")
+			tc.t.Fatalf("expected the code = accepted")
 		}
 
 		gotAck <- true
 	}
 
-	conn := createConnect(cid)
-	err := net.Send("", clientID(cid), conn)
+	conn := createConnect(tc.id)
+	err := tc.net.Send("", clientID(tc.id), conn)
 	if err != nil {
-		t.Fatalf("failed to send connect to client: %s\n", err.Error())
+		tc.t.Fatalf("failed to send connect to client: %s\n", err.Error())
 	}
 
-	wait(t, gotAck, "expected connect to be ack'd")
-}
-
-func testSubscribe(t *testing.T, net *hermes.Hermes, cid MqttClientId, end *TestEndpoint, topic MqttTopicFilter) {
-	pid := MqttPacketId(1223)
-	gotAck := make(chan bool, 1)
-	end.onWrite = func(msg interface{}) {
-		ack, ok := msg.(*MqttSubAckMessage)
-		if !ok {
-			t.Fatalf("expected subscribe ack")
-		}
-
-		if ack.PacketId != pid {
-			t.Fatalf("invalid suback packet id")
-		}
-
-		if ack.ReturnCodes[0] == MqttSubAckFailure {
-			t.Fatalf("subscribe failed")
-		}
-
-		gotAck <- true
-	}
-
-	sub := createSubscribe(pid, topic)
-	err := net.Send("", clientID(cid), sub)
-	if err != nil {
-		t.Fatalf("failed to subscribe to topic: %s\n", err.Error())
-	}
-
-	wait(t, gotAck, "expected to receive subscribe ack")
-}
-
-func testPublish(t *testing.T, net *hermes.Hermes, cid MqttClientId, topic MqttTopicName, payload string) {
-	pid := MqttPacketId(33455)
-	pub := &MqttPublishMessage{TopicName: topic, Payload: []byte(payload), PacketId: pid, QosLevel: MqttQoSLevel0}
-	err := net.Send("", clientID(cid), pub)
-	if err != nil {
-		t.Fatalf("failed to publish message: %s\n", err.Error())
-	}
+	wait(tc.t, gotAck, "expected connect to be ack'd")
 }
 
 func createConnect(cid MqttClientId) *MqttConnectMessage {
