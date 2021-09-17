@@ -26,6 +26,8 @@ func TestPubSubQoS0(t *testing.T) {
 	published := c2.AssertMessageReceived(topic.topicName(), payload)
 	c1.Publish(topic.topicName(), payload, MqttQoSLevel0)
 	wait(t, published, "expected message to be published")
+
+	c2.AssertMessageNotReceived(SessionPublishTimeout + 1000*time.Millisecond)
 }
 
 type TestEndpoint struct {
@@ -118,6 +120,24 @@ func (tc *TestClient) AssertMessageReceived(topic MqttTopicName, payload string)
 	}
 
 	return published
+}
+
+func (tc *TestClient) AssertMessageNotReceived(timeout time.Duration) {
+	published := make(chan bool, 1)
+
+	tc.end.onWrite = func(msg interface{}) {
+		_, ok := msg.(*SessionMessage)
+		if ok {
+			published <- true
+		}
+	}
+
+	select {
+	case <-published:
+		tc.t.Fatalf("did not expect message to be received")
+
+	case <-time.After(timeout):
+	}
 }
 
 func (tc *TestClient) createEndpoint() {
