@@ -75,13 +75,39 @@ type sessionProcessPublishes struct{}
 
 var SessionProcessPublishes = &sessionProcessPublishes{}
 
+type SessionMessage struct {
+	id     MqttPacketId
+	qos    MqttQoSLevel
+	msg    *MqttPublishMessage
+	sentAt time.Time
+}
+
+func (msg *SessionMessage) hasTimeout() bool {
+	return msg.sentAt.Add(SessionPublishTimeout).Before(time.Now())
+}
+
+func (msg *SessionMessage) timeout() time.Duration {
+	t := time.Until(msg.sentAt.Add(SessionPublishTimeout))
+	if t < 0 {
+		return 0
+	}
+
+	return t
+}
+
 type SessionState struct {
-	sub map[MqttTopicFilter]*MqttSubscription
-	pub *hermes.Queue
+	sub      map[MqttTopicFilter]*MqttSubscription
+	pub      *hermes.Queue
+	outbox   *hermes.Queue
+	packetId MqttPacketId
 }
 
 func newSessionState() *SessionState {
-	return &SessionState{sub: make(map[MqttTopicFilter]*MqttSubscription), pub: hermes.NewQueue()}
+	return &SessionState{
+		sub:    make(map[MqttTopicFilter]*MqttSubscription),
+		pub:    hermes.NewQueue(),
+		outbox: hermes.NewQueue(),
+	}
 }
 
 func (state *SessionState) subscribe(msg *MqttSubscribeMessage) ([]MqttSubAckStatus, error) {
@@ -122,41 +148,64 @@ func (state *SessionState) append(msg *MqttPublishMessage) error {
 	return nil
 }
 
+func (s *SessionState) fetchNewMessages() []*SessionMessage {
+	cap := s.inflightCap()
+	msgs := make([]*SessionMessage, 0, cap)
+
+	for mi := 0; mi < cap && s.pub.Size() > 0; mi++ {
+		sm := s.pub.Remove().(*SessionMessage)
+		sm.id = s.nextPacketId()
+		sm.sentAt = time.Now()
+		if sm.qos != MqttQoSLevel0 {
+			s.outbox.Add(sm)
+		}
+
+		msgs = append(msgs, sm)
+	}
+
+	return msgs
+}
+
+func (s *SessionState) fetchLastInflightMessage() *SessionMessage {
+	if s.outbox.Size() <= 0 {
+		return nil
+	}
+
+	return s.outbox.Peek().(*SessionMessage)
+}
+
+func (s *SessionState) remove() {
+	s.outbox.Remove()
+}
+
+func (s *SessionState) inflightCap() int {
+	return SessionMaxOutboxSize - s.outbox.Size()
+}
+
 func (state *SessionState) clean() {
 	state.sub = make(map[MqttTopicFilter]*MqttSubscription)
 	state.pub = hermes.NewQueue()
+	state.outbox = hermes.NewQueue()
 }
 
-type SessionMessage struct {
-	id     MqttPacketId
-	qos    MqttQoSLevel
-	msg    *MqttPublishMessage
-	sentAt time.Time
-}
-
-func (msg *SessionMessage) hasTimeout() bool {
-	return msg.sentAt.Add(SessionPublishTimeout).Before(time.Now())
-}
-
-func (msg *SessionMessage) timeout() time.Duration {
-	t := time.Until(msg.sentAt.Add(SessionPublishTimeout))
-	if t < 0 {
-		return 0
+func (s *SessionState) nextPacketId() MqttPacketId {
+	if s.packetId == math.MaxUint16 {
+		s.packetId = 0
+	} else {
+		s.packetId++
 	}
 
-	return t
+	return s.packetId
 }
 
 type Session struct {
 	consumer   hermes.ReceiverID
 	state      *SessionState
-	outbox     *hermes.Queue
-	packetId   MqttPacketId
 	repubTimer hermes.Timer
 }
 
 func newSession() *Session {
-	return &Session{outbox: hermes.NewQueue()}
+	return &Session{}
 }
 
 func (s *Session) recv(ctx hermes.Context, msg hermes.Message) {
@@ -311,12 +360,13 @@ func (s *Session) onStoreMessage(ctx hermes.Context, msg *MqttPublishMessage) er
 }
 
 func (s *Session) onPubAck(ctx hermes.Context, msg *SessionPubAckRequest) error {
-	sp := s.outbox.Peek().(*SessionMessage)
+	state, _ := s.getState()
+	sp := state.fetchLastInflightMessage()
 	if sp.id != msg.id {
 		return errors.New("invalid_packet_id")
 	}
 
-	s.outbox.Remove()
+	state.remove()
 	s.scheduleRepublish(ctx)
 
 	return nil
@@ -339,28 +389,23 @@ func (s *Session) onProcessPublishes(ctx hermes.Context) {
 
 func (s *Session) processPublishQueue(ctx hermes.Context) {
 	state, _ := s.getState()
-	cap := SessionMaxOutboxSize - s.outbox.Size()
+	msgs := state.fetchNewMessages()
 
-	for mi := 0; mi < cap && state.pub.Size() > 0; mi++ {
-		sm := state.pub.Remove().(*SessionMessage)
-		sm.id = s.nextPacketId()
-		sm.sentAt = time.Now()
-		if sm.qos != MqttQoSLevel0 {
-			s.outbox.Add(sm)
-		}
-		ctx.Send(s.consumer, &SessionMessagePublished{msg: sm})
+	for _, m := range msgs {
+		ctx.Send(s.consumer, &SessionMessagePublished{msg: m})
 	}
 }
 
 func (s *Session) processOutbox(ctx hermes.Context) {
-	if s.outbox.Size() <= 0 {
+	state, _ := s.getState()
+	sm := state.fetchLastInflightMessage()
+	if sm == nil {
 		return
 	}
 
-	msg := s.outbox.Peek().(*SessionMessage)
-	if msg.hasTimeout() {
-		msg.sentAt = time.Now()
-		ctx.Send(s.consumer, &SessionMessagePublished{msg: msg})
+	if sm.hasTimeout() {
+		sm.sentAt = time.Now()
+		ctx.Send(s.consumer, &SessionMessagePublished{msg: sm})
 	}
 
 	s.scheduleRepublish(ctx)
@@ -368,8 +413,9 @@ func (s *Session) processOutbox(ctx hermes.Context) {
 
 func (s *Session) scheduleRepublish(ctx hermes.Context) {
 	if s.repubTimer != nil {
-		if s.outbox.Size() > 0 {
-			sp := s.outbox.Peek().(*SessionMessage)
+		state, _ := s.getState()
+		sp := state.fetchLastInflightMessage()
+		if sp != nil {
 			s.repubTimer.Reset(sp.timeout())
 		}
 		return
@@ -407,11 +453,11 @@ func (s *Session) shouldProcess() bool {
 	}
 
 	state, _ := s.getState()
-	if state.pub.Size() <= 0 {
+	if state.pub.Size() <= 0 || state.inflightCap() <= 0 {
 		return false
 	}
 
-	return (SessionMaxOutboxSize - s.outbox.Size()) > 0
+	return true
 }
 
 func (s *Session) scheduleProcess(ctx hermes.Context) {
@@ -420,16 +466,6 @@ func (s *Session) scheduleProcess(ctx hermes.Context) {
 	}
 
 	ctx.Send(ctx.ID(), SessionProcessPublishes)
-}
-
-func (s *Session) nextPacketId() MqttPacketId {
-	if s.packetId == math.MaxUint16 {
-		s.packetId = 0
-	} else {
-		s.packetId++
-	}
-
-	return s.packetId
 }
 
 func (s *Session) topicNames(filters []MqttTopicFilter) []MqttTopicName {

@@ -170,7 +170,7 @@ func testSubscribeTopic(t *testing.T, ctx *TestContext, s *Session, topic MqttTo
 		return nil
 	}
 	subs := []MqttSubscription{
-		{QosLevel: MqttQoSLevel0, TopicFilter: MqttTopicFilter(topic)},
+		{QosLevel: MqttQoSLevel1, TopicFilter: MqttTopicFilter(topic)},
 	}
 	s.recv(ctx, messageOf(&MqttSubscribeMessage{PacketId: 1, Subscriptions: subs}))
 
@@ -180,7 +180,6 @@ func testSubscribeTopic(t *testing.T, ctx *TestContext, s *Session, topic MqttTo
 }
 
 func testPublishMessage(t *testing.T, ctx *TestContext, s *Session, topic MqttTopicName, payload string) {
-
 	sent := false
 	ctx.onSend = func(ri hermes.ReceiverID, i interface{}) error {
 		if _, ok := i.(*sessionProcessPublishes); !ok {
