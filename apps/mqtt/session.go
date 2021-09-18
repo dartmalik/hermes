@@ -3,7 +3,6 @@ package mqtt
 import (
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -64,7 +63,9 @@ type SessionPubAckReply struct {
 }
 
 type SessionCleanRequest struct{}
-type SessionCleanReply struct{}
+type SessionCleanReply struct {
+	Err error
+}
 
 // events
 type SessionMessagePublished struct {
@@ -75,137 +76,18 @@ type sessionProcessPublishes struct{}
 
 var SessionProcessPublishes = &sessionProcessPublishes{}
 
-type SessionMessage struct {
-	id     MqttPacketId
-	qos    MqttQoSLevel
-	msg    *MqttPublishMessage
-	sentAt time.Time
-}
-
-func (msg *SessionMessage) hasTimeout() bool {
-	return msg.sentAt.Add(SessionPublishTimeout).Before(time.Now())
-}
-
-func (msg *SessionMessage) timeout() time.Duration {
-	t := time.Until(msg.sentAt.Add(SessionPublishTimeout))
-	if t < 0 {
-		return 0
-	}
-
-	return t
-}
-
-type SessionState struct {
-	sub      map[MqttTopicFilter]*MqttSubscription
-	pub      *hermes.Queue
-	outbox   *hermes.Queue
-	packetId MqttPacketId
-}
-
-func newSessionState() *SessionState {
-	return &SessionState{
-		sub:    make(map[MqttTopicFilter]*MqttSubscription),
-		pub:    hermes.NewQueue(),
-		outbox: hermes.NewQueue(),
-	}
-}
-
-func (state *SessionState) subscribe(msg *MqttSubscribeMessage) ([]MqttSubAckStatus, error) {
-	codes := make([]MqttSubAckStatus, len(msg.Subscriptions))
-	for si, sub := range msg.Subscriptions {
-		if strings.ContainsAny(string(sub.TopicFilter), "#+") { //[MQTT-3.8.3-2]
-			codes[si] = MqttSubAckFailure
-			continue
-		}
-
-		if sub.QosLevel > MqttQoSLevel2 { //[MQTT-3.8.3-4]
-			return nil, errors.New("invalid_qos_level")
-		}
-
-		state.sub[sub.TopicFilter] = &MqttSubscription{QosLevel: sub.QosLevel, TopicFilter: sub.TopicFilter}
-	}
-
-	return codes, nil
-}
-
-func (state *SessionState) unsubscribe(filters []MqttTopicFilter) {
-	for _, f := range filters {
-		delete(state.sub, f)
-	}
-}
-
-func (state *SessionState) append(msg *MqttPublishMessage) error {
-	for _, s := range state.sub {
-		if s.TopicFilter.topicName() == msg.TopicName {
-			sm := &SessionMessage{msg: msg, qos: s.QosLevel}
-			_, err := state.pub.Add(sm)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
-func (s *SessionState) fetchNewMessages() []*SessionMessage {
-	cap := s.inflightCap()
-	msgs := make([]*SessionMessage, 0, cap)
-
-	for mi := 0; mi < cap && s.pub.Size() > 0; mi++ {
-		sm := s.pub.Remove().(*SessionMessage)
-		sm.id = s.nextPacketId()
-		sm.sentAt = time.Now()
-		if sm.qos != MqttQoSLevel0 {
-			s.outbox.Add(sm)
-		}
-
-		msgs = append(msgs, sm)
-	}
-
-	return msgs
-}
-
-func (s *SessionState) fetchLastInflightMessage() *SessionMessage {
-	if s.outbox.Size() <= 0 {
-		return nil
-	}
-
-	return s.outbox.Peek().(*SessionMessage)
-}
-
-func (s *SessionState) remove() {
-	s.outbox.Remove()
-}
-
-func (s *SessionState) inflightCap() int {
-	return SessionMaxOutboxSize - s.outbox.Size()
-}
-
-func (state *SessionState) clean() {
-	state.sub = make(map[MqttTopicFilter]*MqttSubscription)
-	state.pub = hermes.NewQueue()
-	state.outbox = hermes.NewQueue()
-}
-
-func (s *SessionState) nextPacketId() MqttPacketId {
-	if s.packetId == math.MaxUint16 {
-		s.packetId = 0
-	} else {
-		s.packetId++
-	}
-
-	return s.packetId
-}
-
 type Session struct {
 	consumer   hermes.ReceiverID
-	state      *SessionState
+	store      SessionStore
 	repubTimer hermes.Timer
 }
 
-func newSession() *Session {
-	return &Session{}
+func newSession(store SessionStore) (*Session, error) {
+	if store == nil {
+		return nil, errors.New("invalid_session_store")
+	}
+
+	return &Session{store: store}, nil
 }
 
 func (s *Session) recv(ctx hermes.Context, msg hermes.Message) {
@@ -248,8 +130,8 @@ func (s *Session) recv(ctx hermes.Context, msg hermes.Message) {
 		s.scheduleProcess(ctx)
 
 	case *SessionCleanRequest:
-		s.onClean()
-		s.reply(ctx, msg, &SessionCleanReply{})
+		err := s.onClean(ctx)
+		s.reply(ctx, msg, &SessionCleanReply{Err: err})
 
 	case *sessionProcessPublishes:
 		s.onProcessPublishes(ctx)
@@ -268,9 +150,7 @@ func (s *Session) onRegister(ctx hermes.Context, msg *SessionRegisterRequest) (b
 
 	s.consumer = msg.id
 
-	_, present := s.getState()
-
-	return present, nil
+	return s.store.Create(string(ctx.ID()))
 }
 
 func (s *Session) onUnregister(ctx hermes.Context, msg *SessionUnregisterRequest) error {
@@ -288,8 +168,7 @@ func (s *Session) onSubscribe(ctx hermes.Context, msg *MqttSubscribeMessage) (Mq
 		return 0, nil, errors.New("missing_subscriptions")
 	}
 
-	state, _ := s.getState()
-	codes, err := state.subscribe(msg)
+	codes, err := s.store.AddSub(string(ctx.ID()), msg.Subscriptions)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -324,9 +203,7 @@ func (s *Session) onUnsubscribe(ctx hermes.Context, msg *MqttUnsubscribeMessage)
 		return 0, rep.err
 	}
 
-	state, _ := s.getState()
-
-	state.unsubscribe(msg.TopicFilters)
+	s.store.RemoveSub(string(ctx.ID()), msg.TopicFilters)
 
 	return msg.PacketId, nil
 }
@@ -350,31 +227,28 @@ func (s *Session) onPublishMessage(ctx hermes.Context, req *SessionPublishReques
 }
 
 func (s *Session) onStoreMessage(ctx hermes.Context, msg *MqttPublishMessage) error {
-	if msg == nil {
-		return errors.New("invalid_message")
-	}
-
-	state, _ := s.getState()
-
-	return state.append(msg)
+	return s.store.Append(string(ctx.ID()), msg)
 }
 
 func (s *Session) onPubAck(ctx hermes.Context, msg *SessionPubAckRequest) error {
-	state, _ := s.getState()
-	sp := state.fetchLastInflightMessage()
+	sp, err := s.store.FetchLastInflightMessage(string(ctx.ID()))
+	if err != nil {
+		return err
+	}
+
 	if sp.id != msg.id {
 		return errors.New("invalid_packet_id")
 	}
 
-	state.remove()
+	s.store.Remove(string(ctx.ID()))
+
 	s.scheduleRepublish(ctx)
 
 	return nil
 }
 
-func (s *Session) onClean() {
-	state, _ := s.getState()
-	state.clean()
+func (s *Session) onClean(ctx hermes.Context) error {
+	return s.store.Clean(string(ctx.ID()))
 }
 
 func (s *Session) onProcessPublishes(ctx hermes.Context) {
@@ -388,8 +262,11 @@ func (s *Session) onProcessPublishes(ctx hermes.Context) {
 }
 
 func (s *Session) processPublishQueue(ctx hermes.Context) {
-	state, _ := s.getState()
-	msgs := state.fetchNewMessages()
+	msgs, err := s.store.FetchNewMessages(string(ctx.ID()))
+	if err != nil {
+		fmt.Printf("process publish queue failed: %s\n", err.Error())
+		return
+	}
 
 	for _, m := range msgs {
 		ctx.Send(s.consumer, &SessionMessagePublished{msg: m})
@@ -397,8 +274,12 @@ func (s *Session) processPublishQueue(ctx hermes.Context) {
 }
 
 func (s *Session) processOutbox(ctx hermes.Context) {
-	state, _ := s.getState()
-	sm := state.fetchLastInflightMessage()
+	sm, err := s.store.FetchLastInflightMessage(string(ctx.ID()))
+	if err != nil {
+		fmt.Printf("process outbox failed: %s\n", err.Error())
+		return
+	}
+
 	if sm == nil {
 		return
 	}
@@ -413,8 +294,12 @@ func (s *Session) processOutbox(ctx hermes.Context) {
 
 func (s *Session) scheduleRepublish(ctx hermes.Context) {
 	if s.repubTimer != nil {
-		state, _ := s.getState()
-		sp := state.fetchLastInflightMessage()
+		sp, err := s.store.FetchLastInflightMessage(string(ctx.ID()))
+		if err != nil {
+			fmt.Printf("failed to reschedule repub timer: %s\n", err.Error())
+			return
+		}
+
 		if sp != nil {
 			s.repubTimer.Reset(sp.timeout())
 		}
@@ -430,16 +315,6 @@ func (s *Session) scheduleRepublish(ctx hermes.Context) {
 	s.repubTimer = t
 }
 
-func (s *Session) getState() (outState *SessionState, present bool) {
-	if s.state != nil {
-		return s.state, true
-	}
-
-	s.state = newSessionState()
-
-	return s.state, false
-}
-
 func (s *Session) reply(ctx hermes.Context, msg hermes.Message, payload interface{}) {
 	err := ctx.Reply(msg, payload)
 	if err != nil {
@@ -447,21 +322,22 @@ func (s *Session) reply(ctx hermes.Context, msg hermes.Message, payload interfac
 	}
 }
 
-func (s *Session) shouldProcess() bool {
+func (s *Session) shouldProcess(ctx hermes.Context) bool {
 	if s.consumer == "" {
 		return false
 	}
 
-	state, _ := s.getState()
-	if state.pub.Size() <= 0 || state.inflightCap() <= 0 {
-		return false
+	e, err := s.store.IsEmpty(string(ctx.ID()))
+	if err != nil {
+		fmt.Printf("failed to check if session is empty")
+		return true
 	}
 
-	return true
+	return !e
 }
 
 func (s *Session) scheduleProcess(ctx hermes.Context) {
-	if !s.shouldProcess() {
+	if !s.shouldProcess(ctx) {
 		return
 	}
 

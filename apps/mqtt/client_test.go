@@ -2,24 +2,32 @@ package mqtt
 
 import (
 	"errors"
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/dartali/hermes"
 )
 
+var curClientId uint64 = 0
+
+func NewClientId() MqttClientId {
+	return MqttClientId(fmt.Sprintf("c%d", atomic.AddUint64(&curClientId, 1)))
+}
+
 func TestClientConnect(t *testing.T) {
 	net := createNet(t)
 
-	NewTestClient(MqttClientId("c1"), t, net).Init()
+	NewTestClient(NewClientId(), t, net).Init()
 }
 
 func TestPubSubQoS0(t *testing.T) {
 	payload := "m1"
 	topic := MqttTopicFilter("test")
 	net := createNet(t)
-	c1 := NewTestClient(MqttClientId("c1"), t, net).Init()
-	c2 := NewTestClient(MqttClientId("c2"), t, net).Init()
+	c1 := NewTestClient(NewClientId(), t, net).Init()
+	c2 := NewTestClient(NewClientId(), t, net).Init()
 
 	c2.Subscribe(topic, MqttQoSLevel0)
 
@@ -33,8 +41,8 @@ func TestPubSubQoS1(t *testing.T) {
 	payload := "m1"
 	topic := MqttTopicFilter("test")
 	net := createNet(t)
-	c1 := NewTestClient(MqttClientId("c1"), t, net).Init()
-	c2 := NewTestClient(MqttClientId("c2"), t, net).Init()
+	c1 := NewTestClient(NewClientId(), t, net).Init()
+	c2 := NewTestClient(NewClientId(), t, net).Init()
 
 	c2.Subscribe(topic, MqttQoSLevel1)
 
@@ -233,11 +241,18 @@ func createSubscribe(pid MqttPacketId, topic MqttTopicFilter, qos MqttQoSLevel) 
 	}
 }
 
+var sessionStore = NewInMemSessionStore()
+
 func recvFactory(id hermes.ReceiverID) (hermes.Receiver, error) {
 	if isClientID(id) {
 		return newClient().preConnectRecv, nil
 	} else if isSessionID(id) {
-		return newSession().recv, nil
+		s, err := newSession(sessionStore)
+		if err != nil {
+			return nil, err
+		}
+
+		return s.recv, nil
 	} else if IsPubSubID(id) {
 		return NewPubSub().recv, nil
 	}

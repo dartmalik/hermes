@@ -70,7 +70,7 @@ func messageOf(payload interface{}) hermes.Message {
 
 func TestConsumerRegister(t *testing.T) {
 	ctx := &TestContext{id: "test-session"}
-	s := newSession()
+	s := createSession(t)
 
 	testConsumerRegister(t, ctx, s, "")
 	testConsumerRegister(t, ctx, s, "c1")
@@ -79,7 +79,7 @@ func TestConsumerRegister(t *testing.T) {
 
 func TestMessageDelivery(t *testing.T) {
 	ctx := &TestContext{id: "s1"}
-	s := newSession()
+	s := createSession(t)
 	cid := hermes.ReceiverID("c1")
 	topic := MqttTopicName("t")
 
@@ -95,7 +95,7 @@ func TestMessageDelivery(t *testing.T) {
 
 func TestMultipleMessageDelivery(t *testing.T) {
 	ctx := &TestContext{id: "s1"}
-	s := newSession()
+	s := createSession(t)
 	cid := hermes.ReceiverID("c1")
 	topic := MqttTopicName("t")
 
@@ -106,6 +106,15 @@ func TestMultipleMessageDelivery(t *testing.T) {
 		testPublishMessage(t, ctx, s, topic, fmt.Sprintf("m%d", mi))
 		testPublishProcess(t, ctx, s, topic, fmt.Sprintf("m%d", mi))
 	}
+}
+
+func createSession(t *testing.T) *Session {
+	s, err := newSession(NewInMemSessionStore())
+	if err != nil {
+		t.Fatalf("faild to create session: %s\n", err.Error())
+	}
+
+	return s
 }
 
 func testConsumerRegister(t *testing.T, ctx *TestContext, s *Session, cid hermes.ReceiverID) {
