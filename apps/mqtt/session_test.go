@@ -147,7 +147,7 @@ func testConsumerRegister(t *testing.T, ctx *TestContext, s *Session, cid hermes
 		return nil
 	}
 
-	s.recv(ctx, messageOf(&SessionRegisterRequest{id: cid}))
+	s.recv(ctx, messageOf(&SessionRegisterRequest{ConsumerID: cid}))
 
 	if s.consumer != cid {
 		t.Fatalf("expected consumer to be set in session, instead found: %s \n", s.consumer)
@@ -214,7 +214,7 @@ func testPublishProcess(t *testing.T, ctx *TestContext, s *Session, topic MqttTo
 			t.Fatalf("expected message of type publish")
 		}
 
-		m := smp.msg
+		m := smp.Msg
 		if m.msg.TopicName != topic {
 			t.Fatalf("expected message to be published to %s but got %s", topic, m.msg.TopicName)
 		}
