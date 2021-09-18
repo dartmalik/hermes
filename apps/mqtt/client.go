@@ -77,6 +77,8 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
 			cl.endpoint.Close()
 		} else if pub.QosLevel == MqttQoSLevel1 {
 			cl.endpoint.Write(&MqttPubAckMessage{PacketId: pub.PacketId})
+		} else if pub.QosLevel == MqttQoSLevel2 {
+			cl.endpoint.Write(&MqttPubRecMessage{PacketId: pub.PacketId})
 		}
 
 	case *MqttPubRelMessage:

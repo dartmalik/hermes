@@ -55,6 +55,24 @@ func TestPubSubQoS1(t *testing.T) {
 	wait(t, published, "expected message to be published")
 }
 
+func TestPubSubQoS2(t *testing.T) {
+	payload := "m1"
+	topic := MqttTopicFilter("test")
+	net := createNet(t)
+	c1 := NewTestClient(NewClientId(), t, net).Init()
+	c2 := NewTestClient(NewClientId(), t, net).Init()
+
+	c2.Subscribe(topic, MqttQoSLevel1)
+
+	published := c2.AssertMessageReceived(topic.topicName(), payload)
+	c1.Publish(topic.topicName(), payload, MqttQoSLevel2)
+	wait(t, published, "expected message to be published")
+
+	published = c2.AssertMessageReceived(topic.topicName(), payload)
+	time.Sleep(SessionPublishTimeout + 1000*time.Millisecond)
+	wait(t, published, "expected message to be published")
+}
+
 type TestEndpoint struct {
 	onWrite func(msg interface{})
 	onClose func()
@@ -132,14 +150,25 @@ func (tc *TestClient) Publish(topic MqttTopicName, payload string, qos MqttQoSLe
 				tc.t.Fatalf("did not expecte QoS0 message to be ackd")
 			}
 		}
-	} else {
+	} else if qos == MqttQoSLevel1 {
 		tc.end.onWrite = func(msg interface{}) {
 			ack, ok := msg.(*MqttPubAckMessage)
 			if !ok {
-				tc.t.Fatalf("expected the publish to be acked")
+				tc.t.Fatalf("expected PUBACK")
 			}
 			if ack.PacketId != pid {
-				tc.t.Fatalf("received incorrect packet id in ack")
+				tc.t.Fatalf("received incorrect packet id in PUBACK")
+			}
+			ackd <- true
+		}
+	} else if qos == MqttQoSLevel2 {
+		tc.end.onWrite = func(msg interface{}) {
+			ack, ok := msg.(*MqttPubRecMessage)
+			if !ok {
+				tc.t.Fatalf("expected PUBREC")
+			}
+			if ack.PacketId != pid {
+				tc.t.Fatalf("received incorrect packet id in PUBREC")
 			}
 			ackd <- true
 		}
@@ -152,6 +181,10 @@ func (tc *TestClient) Publish(topic MqttTopicName, payload string, qos MqttQoSLe
 	}
 
 	wait(tc.t, ackd, "expected to receive an ack for publish")
+
+	if qos == MqttQoSLevel2 { // send PUBREL
+		tc.pubrel(pid)
+	}
 }
 
 func (tc *TestClient) AssertMessageReceived(topic MqttTopicName, payload string) chan bool {
@@ -226,6 +259,28 @@ func (tc *TestClient) connect() {
 	}
 
 	wait(tc.t, gotAck, "expected connect to be ack'd")
+}
+
+func (tc *TestClient) pubrel(pid MqttPacketId) {
+	completed := make(chan bool, 1)
+	tc.end.onWrite = func(msg interface{}) {
+		ack, ok := msg.(*MqttPubCompMessage)
+		if !ok {
+			tc.t.Fatalf("expected PUBCOMP")
+		}
+		if ack.PacketId != pid {
+			tc.t.Fatalf("received incorrect packet id in PUBCOMP")
+		}
+		completed <- true
+	}
+
+	pubrel := &MqttPubRelMessage{PacketId: pid}
+	err := tc.net.Send("", clientID(tc.id), pubrel)
+	if err != nil {
+		tc.t.Fatalf("failed to publish message: %s\n", err.Error())
+	}
+
+	wait(tc.t, completed, "expected publish to be released")
 }
 
 func createConnect(cid MqttClientId) *MqttConnectMessage {

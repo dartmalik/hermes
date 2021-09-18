@@ -231,7 +231,7 @@ func (s *Session) onPublishMessage(ctx hermes.Context, req *SessionPublishReques
 	}
 
 	if req.Msg.QosLevel == MqttQoSLevel2 {
-		s.recvMsgs.Add(req.Msg)
+		s.recvMsgs.Add(req.Msg.PacketId)
 	}
 
 	rep := rm.Payload().(*PubSubPublishReply)
