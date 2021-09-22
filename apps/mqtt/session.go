@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dartali/hermes"
+	"github.com/elliotchance/orderedmap"
 )
 
 const (
@@ -86,7 +87,7 @@ var SessionProcessPublishes = &sessionProcessPublishes{}
 type Session struct {
 	consumer   hermes.ReceiverID
 	store      SessionStore
-	recvMsgs   *hermes.Queue
+	inbox      *orderedmap.OrderedMap
 	repubTimer hermes.Timer
 }
 
@@ -95,7 +96,7 @@ func newSession(store SessionStore) (*Session, error) {
 		return nil, errors.New("invalid_session_store")
 	}
 
-	return &Session{store: store, recvMsgs: hermes.NewQueue()}, nil
+	return &Session{store: store, inbox: orderedmap.NewOrderedMap()}, nil
 }
 
 func (s *Session) recv(ctx hermes.Context, msg hermes.Message) {
@@ -225,13 +226,17 @@ func (s *Session) onPublishMessage(ctx hermes.Context, req *SessionPublishReques
 		return errors.New("invalid_message")
 	}
 
+	if _, ok := s.inbox.Get(req.Msg.PacketId); ok {
+		return errors.New("duplicate_publish")
+	}
+
 	rm, err := ctx.RequestWithTimeout(PubSubID(), &PubSubPublishRequest{msg: req.Msg}, 1500*time.Millisecond)
 	if err != nil {
 		return err
 	}
 
 	if req.Msg.QosLevel == MqttQoSLevel2 {
-		s.recvMsgs.Add(req.Msg.PacketId)
+		s.inbox.Set(req.Msg.PacketId, true)
 	}
 
 	rep := rm.Payload().(*PubSubPublishReply)
@@ -243,12 +248,12 @@ func (s *Session) onPublishMessage(ctx hermes.Context, req *SessionPublishReques
 }
 
 func (s *Session) onPubRel(ctx hermes.Context, pid MqttPacketId) error {
-	rpid := s.recvMsgs.Peek().(MqttPacketId)
+	rpid := s.inbox.Front().Key.(MqttPacketId)
 	if pid != rpid {
 		return errors.New("invalid_release_pid")
 	}
 
-	s.recvMsgs.Remove()
+	s.inbox.Delete(pid)
 
 	return nil
 }
