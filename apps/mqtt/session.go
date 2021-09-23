@@ -11,8 +11,7 @@ import (
 )
 
 const (
-	SessionMaxOutboxSize  = 5
-	SessionPublishTimeout = 10 * time.Second
+	SessionMaxOutboxSize = 5
 )
 
 func isSessionID(id hermes.ReceiverID) bool {
@@ -85,18 +84,23 @@ type sessionProcessPublishes struct{}
 var SessionProcessPublishes = &sessionProcessPublishes{}
 
 type Session struct {
-	consumer   hermes.ReceiverID
-	store      SessionStore
-	inbox      *orderedmap.OrderedMap
-	repubTimer hermes.Timer
+	consumer     hermes.ReceiverID
+	store        SessionStore
+	inbox        *orderedmap.OrderedMap
+	repubTimer   hermes.Timer
+	repubTimeout time.Duration
 }
 
-func newSession(store SessionStore) (*Session, error) {
+func newSession(store SessionStore, repubTimeout time.Duration) (*Session, error) {
 	if store == nil {
 		return nil, errors.New("invalid_session_store")
 	}
 
-	return &Session{store: store, inbox: orderedmap.NewOrderedMap()}, nil
+	return &Session{
+		store:        store,
+		inbox:        orderedmap.NewOrderedMap(),
+		repubTimeout: repubTimeout,
+	}, nil
 }
 
 func (s *Session) recv(ctx hermes.Context, msg hermes.Message) {
@@ -316,7 +320,7 @@ func (s *Session) processOutbox(ctx hermes.Context) {
 		return
 	}
 
-	if sm.hasTimeout() {
+	if s.hasTimeout(sm) {
 		sm.sentAt = time.Now()
 		ctx.Send(s.consumer, &SessionMessagePublished{Msg: sm})
 	}
@@ -333,12 +337,12 @@ func (s *Session) scheduleRepublish(ctx hermes.Context) {
 		}
 
 		if sp != nil {
-			s.repubTimer.Reset(sp.timeout())
+			s.repubTimer.Reset(s.timeout(sp))
 		}
 		return
 	}
 
-	t, err := ctx.Schedule(SessionPublishTimeout, SessionProcessPublishes)
+	t, err := ctx.Schedule(s.repubTimeout, SessionProcessPublishes)
 	if err != nil {
 		fmt.Printf("failed to schedule publishe process: %s\n", err.Error())
 		return
@@ -383,4 +387,17 @@ func (s *Session) topicNames(filters []MqttTopicFilter) []MqttTopicName {
 	}
 
 	return topics
+}
+
+func (s *Session) hasTimeout(msg *SessionMessage) bool {
+	return msg.sentAt.Add(s.repubTimeout).Before(time.Now())
+}
+
+func (s *Session) timeout(msg *SessionMessage) time.Duration {
+	t := time.Until(msg.sentAt.Add(s.repubTimeout))
+	if t < 0 {
+		return 0
+	}
+
+	return t
 }

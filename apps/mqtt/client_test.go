@@ -35,7 +35,7 @@ func TestPubSubQoS0(t *testing.T) {
 	c1.Publish(topic.topicName(), payload, MqttQoSLevel0)
 	wait(t, published, "expected message to be published")
 
-	c2.AssertMessageNotReceived(SessionPublishTimeout + 1000*time.Millisecond)
+	c2.AssertMessageNotReceived(SessionRepubTimeout + 1000*time.Millisecond)
 }
 func TestPubSubQoS1(t *testing.T) {
 	payload := "m1"
@@ -51,7 +51,7 @@ func TestPubSubQoS1(t *testing.T) {
 	wait(t, published, "expected message to be published")
 
 	published = c2.AssertMessageReceived(topic.topicName(), payload)
-	time.Sleep(SessionPublishTimeout + 1000*time.Millisecond)
+	time.Sleep(SessionRepubTimeout + 1000*time.Millisecond)
 	wait(t, published, "expected message to be published")
 }
 
@@ -69,7 +69,7 @@ func TestPubSubQoS2(t *testing.T) {
 	wait(t, published, "expected message to be published")
 
 	published = c2.AssertMessageReceived(topic.topicName(), payload)
-	time.Sleep(SessionPublishTimeout + 1000*time.Millisecond)
+	time.Sleep(SessionRepubTimeout + 1000*time.Millisecond)
 	wait(t, published, "expected message to be published")
 }
 
@@ -302,7 +302,7 @@ func recvFactory(id hermes.ReceiverID) (hermes.Receiver, error) {
 	if isClientID(id) {
 		return newClient().preConnectRecv, nil
 	} else if isSessionID(id) {
-		s, err := newSession(sessionStore)
+		s, err := newSession(sessionStore, SessionRepubTimeout)
 		if err != nil {
 			return nil, err
 		}

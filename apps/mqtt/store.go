@@ -18,19 +18,6 @@ type SessionMessage struct {
 	sentAt time.Time
 }
 
-func (msg *SessionMessage) hasTimeout() bool {
-	return msg.sentAt.Add(SessionPublishTimeout).Before(time.Now())
-}
-
-func (msg *SessionMessage) timeout() time.Duration {
-	t := time.Until(msg.sentAt.Add(SessionPublishTimeout))
-	if t < 0 {
-		return 0
-	}
-
-	return t
-}
-
 type sessionState struct {
 	sub      map[MqttTopicFilter]*MqttSubscription
 	pub      *hermes.Queue

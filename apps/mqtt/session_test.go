@@ -8,6 +8,10 @@ import (
 	"github.com/dartali/hermes"
 )
 
+const (
+	SessionRepubTimeout = 1 * time.Second
+)
+
 type TestContext struct {
 	id                   hermes.ReceiverID
 	onSetReceiver        func(hermes.Receiver)
@@ -88,7 +92,7 @@ func TestMessageDelivery(t *testing.T) {
 	testPublishMessage(t, ctx, s, topic, "test")
 	testPublishProcess(t, ctx, s, topic, "test")
 
-	time.Sleep(100*time.Millisecond + SessionPublishTimeout)
+	time.Sleep(100*time.Millisecond + SessionRepubTimeout)
 
 	testPublishProcess(t, ctx, s, topic, "test")
 }
@@ -109,7 +113,7 @@ func TestMultipleMessageDelivery(t *testing.T) {
 }
 
 func createSession(t *testing.T) *Session {
-	s, err := newSession(NewInMemSessionStore())
+	s, err := newSession(NewInMemSessionStore(), SessionRepubTimeout)
 	if err != nil {
 		t.Fatalf("faild to create session: %s\n", err.Error())
 	}
