@@ -136,6 +136,8 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
 		} else if smp.Msg.state == SMStateAcked {
 			if smp.Msg.qos == MqttQoSLevel2 {
 				cl.endpoint.Write(&MqttPubRelMessage{PacketId: smp.Msg.id})
+			} else {
+				cl.endpoint.Close()
 			}
 		}
 
