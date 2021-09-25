@@ -12,14 +12,15 @@ import (
 
 const (
 	SessionMaxOutboxSize = 5
+	SessionIDPrefix      = "/sessions/"
 )
 
 func isSessionID(id hermes.ReceiverID) bool {
-	return strings.HasPrefix(string(id), "/sessions")
+	return strings.HasPrefix(string(id), SessionIDPrefix)
 }
 
 func sessionID(id MqttClientId) hermes.ReceiverID {
-	return hermes.ReceiverID("/sessions/" + string(id))
+	return hermes.ReceiverID(SessionIDPrefix + string(id))
 }
 
 type SessionRegisterRequest struct {
@@ -59,6 +60,20 @@ type SessionPubAckRequest struct {
 	PacketID MqttPacketId
 }
 type SessionPubAckReply struct {
+	Err error
+}
+
+type SessionPubRecRequest struct {
+	PacketID MqttPacketId
+}
+type SessionPubRecReply struct {
+	Err error
+}
+
+type SessionPubCompRequest struct {
+	PacketID MqttPacketId
+}
+type SessionPubCompReply struct {
 	Err error
 }
 
@@ -137,6 +152,18 @@ func (s *Session) recv(ctx hermes.Context, msg hermes.Message) {
 	case *SessionPubAckRequest:
 		err := s.onPubAck(ctx, msg.Payload().(*SessionPubAckRequest))
 		s.reply(ctx, msg, &SessionPubAckReply{Err: err})
+		s.scheduleProcess(ctx)
+
+	case *SessionPubRecRequest:
+		req := msg.Payload().(*SessionPubRecRequest)
+		err := s.onPubRec(ctx, req.PacketID)
+		s.reply(ctx, msg, &SessionPubRecReply{Err: err})
+		s.scheduleProcess(ctx)
+
+	case *SessionPubCompReply:
+		req := msg.Payload().(*SessionPubCompRequest)
+		err := s.onPubComp(ctx, req.PacketID)
+		s.reply(ctx, msg, &SessionPubCompReply{Err: err})
 		s.scheduleProcess(ctx)
 
 	case *PubSubMessagePublished:
@@ -267,18 +294,74 @@ func (s *Session) onStoreMessage(ctx hermes.Context, msg *MqttPublishMessage) er
 }
 
 func (s *Session) onPubAck(ctx hermes.Context, msg *SessionPubAckRequest) error {
-	sp, err := s.store.FetchLastInflightMessage(string(ctx.ID()))
+	return s.ackMsg(ctx, msg.PacketID, MqttQoSLevel1)
+}
+
+func (s *Session) onPubRec(ctx hermes.Context, pid MqttPacketId) error {
+	return s.ackMsg(ctx, pid, MqttQoSLevel2)
+}
+
+func (s *Session) onPubComp(ctx hermes.Context, pid MqttPacketId) error {
+	sid := string(ctx.ID())
+	sp, err := s.store.FetchLastInflightMessage(sid, SMStatePublished)
 	if err != nil {
 		return err
 	}
 
-	if sp.id != msg.PacketID {
+	if sp.id != pid {
+		return errors.New("invalid_packet_id")
+	}
+	if sp.qos != MqttQoSLevel2 {
 		return errors.New("invalid_packet_id")
 	}
 
-	s.store.Remove(string(ctx.ID()))
+	ok, err := s.store.RemoveMsg(sid, pid)
+	if !ok {
+		return errors.New("invalid_packet_id")
+	}
+	if err != nil {
+		return err
+	}
 
 	s.scheduleRepublish(ctx)
+
+	return nil
+}
+
+func (s *Session) ackMsg(ctx hermes.Context, pid MqttPacketId, qos MqttQoSLevel) error {
+	sid := string(ctx.ID())
+	sp, err := s.store.FetchLastInflightMessage(sid, SMStatePublished)
+	if err != nil {
+		return err
+	}
+
+	if sp.id != pid {
+		return errors.New("invalid_packet_id")
+	}
+	if sp.qos != qos {
+		return errors.New("invalid_packet_id")
+	}
+
+	if qos == MqttQoSLevel1 {
+		ok, err := s.store.RemoveMsg(sid, pid)
+		if !ok {
+			return errors.New("invalid_packet_id")
+		}
+		if err != nil {
+			return err
+		}
+
+		s.scheduleRepublish(ctx)
+	} else {
+		ok, err := s.store.AckMsg(sid, pid)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("invalid_packet_id")
+		}
+		sp.sentAt = time.Now()
+	}
 
 	return nil
 }
@@ -305,12 +388,12 @@ func (s *Session) processPublishQueue(ctx hermes.Context) {
 	}
 
 	for _, m := range msgs {
-		ctx.Send(s.consumer, &SessionMessagePublished{Msg: m})
+		s.send(ctx, m)
 	}
 }
 
 func (s *Session) processOutbox(ctx hermes.Context) {
-	sm, err := s.store.FetchLastInflightMessage(string(ctx.ID()))
+	sm, err := s.store.FetchLastInflightMessage(string(ctx.ID()), SMStateAny)
 	if err != nil {
 		fmt.Printf("process outbox failed: %s\n", err.Error())
 		return
@@ -321,16 +404,21 @@ func (s *Session) processOutbox(ctx hermes.Context) {
 	}
 
 	if s.hasTimeout(sm) {
-		sm.sentAt = time.Now()
-		ctx.Send(s.consumer, &SessionMessagePublished{Msg: sm})
+		s.send(ctx, sm)
 	}
 
 	s.scheduleRepublish(ctx)
 }
 
+func (s *Session) send(ctx hermes.Context, msg *SessionMessage) {
+	msg.sentCount++
+	msg.sentAt = time.Now()
+	ctx.Send(s.consumer, &SessionMessagePublished{Msg: msg})
+}
+
 func (s *Session) scheduleRepublish(ctx hermes.Context) {
 	if s.repubTimer != nil {
-		sp, err := s.store.FetchLastInflightMessage(string(ctx.ID()))
+		sp, err := s.store.FetchLastInflightMessage(string(ctx.ID()), SMStateAny)
 		if err != nil {
 			fmt.Printf("failed to reschedule repub timer: %s\n", err.Error())
 			return

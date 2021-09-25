@@ -7,21 +7,31 @@ import (
 	"time"
 
 	"github.com/dartali/hermes"
+	"github.com/elliotchance/orderedmap"
 )
 
 var ErrSessionMissing = errors.New("missing_session")
 
+const (
+	SMStateQueued = iota
+	SMStatePublished
+	SMStateAcked
+	SMStateAny
+)
+
 type SessionMessage struct {
-	id     MqttPacketId
-	qos    MqttQoSLevel
-	msg    *MqttPublishMessage
-	sentAt time.Time
+	id        MqttPacketId
+	qos       MqttQoSLevel
+	msg       *MqttPublishMessage
+	state     int
+	sentAt    time.Time
+	sentCount int
 }
 
 type sessionState struct {
 	sub      map[MqttTopicFilter]*MqttSubscription
 	pub      *hermes.Queue
-	outbox   *hermes.Queue
+	outbox   *orderedmap.OrderedMap
 	packetId MqttPacketId
 }
 
@@ -29,7 +39,7 @@ func newSessionState() *sessionState {
 	return &sessionState{
 		sub:    make(map[MqttTopicFilter]*MqttSubscription),
 		pub:    hermes.NewQueue(),
-		outbox: hermes.NewQueue(),
+		outbox: orderedmap.NewOrderedMap(),
 	}
 }
 
@@ -77,10 +87,11 @@ func (s *sessionState) fetchNewMessages() []*SessionMessage {
 
 	for mi := 0; mi < cap && s.pub.Size() > 0; mi++ {
 		sm := s.pub.Remove().(*SessionMessage)
-		sm.id = s.nextPacketId()
-		sm.sentAt = time.Now()
+		sm.id, sm.sentAt = s.nextPacketId(), time.Now()
+		sm.state = SMStatePublished
+
 		if sm.qos != MqttQoSLevel0 {
-			s.outbox.Add(sm)
+			s.outbox.Set(sm.id, sm)
 		}
 
 		msgs = append(msgs, sm)
@@ -89,26 +100,49 @@ func (s *sessionState) fetchNewMessages() []*SessionMessage {
 	return msgs
 }
 
-func (s *sessionState) fetchLastInflightMessage() *SessionMessage {
-	if s.outbox.Size() <= 0 {
-		return nil
+func (s *sessionState) fetchLastInflightMessage(state int) *SessionMessage {
+	for e := s.outbox.Front(); e != nil; e = e.Next() {
+		sm := e.Value.(*SessionMessage)
+		if sm.state == state || state == SMStateAny {
+			return sm
+		}
 	}
 
-	return s.outbox.Peek().(*SessionMessage)
+	return nil
 }
 
 func (s *sessionState) remove() {
-	s.outbox.Remove()
+	s.outbox.Delete(s.outbox.Front().Key)
+}
+
+func (s *sessionState) removeMsg(pid MqttPacketId) bool {
+	return s.outbox.Delete(pid)
+}
+
+func (s *sessionState) ackMsg(pid MqttPacketId) bool {
+	i, ok := s.outbox.Get(pid)
+	if !ok {
+		return false
+	}
+
+	sm := i.(*SessionMessage)
+	if sm.state != SMStatePublished {
+		return false
+	}
+
+	sm.state = SMStateAcked
+
+	return true
 }
 
 func (s *sessionState) inflightCap() int {
-	return SessionMaxOutboxSize - s.outbox.Size()
+	return SessionMaxOutboxSize - s.outbox.Len()
 }
 
 func (state *sessionState) clean() {
 	state.sub = make(map[MqttTopicFilter]*MqttSubscription)
 	state.pub = hermes.NewQueue()
-	state.outbox = hermes.NewQueue()
+	state.outbox = orderedmap.NewOrderedMap()
 }
 
 func (s *sessionState) nextPacketId() MqttPacketId {
@@ -127,9 +161,11 @@ type SessionStore interface {
 	RemoveSub(id string, filters []MqttTopicFilter) error
 	Append(id string, msg *MqttPublishMessage) error
 	Remove(id string) error
+	RemoveMsg(id string, pid MqttPacketId) (deleted bool, err error)
+	AckMsg(id string, pid MqttPacketId) (done bool, err error)
 	Clean(id string) error
 	FetchNewMessages(id string) ([]*SessionMessage, error)
-	FetchLastInflightMessage(id string) (*SessionMessage, error)
+	FetchLastInflightMessage(id string, state int) (*SessionMessage, error)
 	IsEmpty(id string) (bool, error)
 }
 
@@ -198,6 +234,24 @@ func (store *InMemSessionStore) Remove(id string) error {
 	return nil
 }
 
+func (store *InMemSessionStore) RemoveMsg(id string, pid MqttPacketId) (bool, error) {
+	s, ok := store.sessions.Get(id)
+	if !ok {
+		return false, ErrSessionMissing
+	}
+
+	return s.(*sessionState).removeMsg(pid), nil
+}
+
+func (store *InMemSessionStore) AckMsg(id string, pid MqttPacketId) (bool, error) {
+	s, ok := store.sessions.Get(id)
+	if !ok {
+		return false, ErrSessionMissing
+	}
+
+	return s.(*sessionState).ackMsg(pid), nil
+}
+
 func (store *InMemSessionStore) Clean(id string) error {
 	s, ok := store.sessions.Get(id)
 	if !ok {
@@ -218,13 +272,13 @@ func (store *InMemSessionStore) FetchNewMessages(id string) ([]*SessionMessage, 
 	return s.(*sessionState).fetchNewMessages(), nil
 }
 
-func (store *InMemSessionStore) FetchLastInflightMessage(id string) (*SessionMessage, error) {
+func (store *InMemSessionStore) FetchLastInflightMessage(id string, state int) (*SessionMessage, error) {
 	s, ok := store.sessions.Get(id)
 	if !ok {
 		return nil, ErrSessionMissing
 	}
 
-	return s.(*sessionState).fetchLastInflightMessage(), nil
+	return s.(*sessionState).fetchLastInflightMessage(state), nil
 }
 
 func (store *InMemSessionStore) IsEmpty(id string) (bool, error) {

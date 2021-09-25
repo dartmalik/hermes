@@ -9,7 +9,8 @@ import (
 )
 
 const (
-	ClientIDPrefix = "/clients"
+	ClientIDPrefix       = "/clients/"
+	ClientRequestTimeout = 1500 * time.Millisecond
 )
 
 type Endpoint interface {
@@ -69,7 +70,7 @@ func (cl *Client) preConnectRecv(ctx hermes.Context, msg hermes.Message) {
 }
 
 func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
-	switch msg.Payload().(type) {
+	switch t := msg.Payload().(type) {
 	case *MqttPublishMessage:
 		pub := msg.Payload().(*MqttPublishMessage)
 		err := cl.onPublish(ctx, pub)
@@ -79,6 +80,22 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
 			cl.endpoint.Write(&MqttPubAckMessage{PacketId: pub.PacketId})
 		} else if pub.QosLevel == MqttQoSLevel2 {
 			cl.endpoint.Write(&MqttPubRecMessage{PacketId: pub.PacketId})
+		}
+
+	case *MqttPubRecMessage:
+		pr := msg.Payload().(*MqttPubRecMessage)
+		err := cl.onPubRec(ctx, pr.PacketId)
+		if err != nil {
+			cl.endpoint.Close()
+		} else {
+			cl.endpoint.Write(&MqttPubRelMessage{PacketId: pr.PacketId})
+		}
+
+	case *MqttPubCompMessage:
+		pc := msg.Payload().(*MqttPubCompMessage)
+		err := cl.onPubComp(ctx, pc.PacketId)
+		if err != nil {
+			cl.endpoint.Close()
 		}
 
 	case *MqttPubRelMessage:
@@ -110,13 +127,16 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
 
 	case *SessionMessagePublished:
 		smp := msg.Payload().(*SessionMessagePublished)
-		cl.endpoint.Write(smp.Msg)
-		if smp.Msg.msg.QosLevel == MqttQoSLevel0 {
-			ctx.Send(sessionID(cl.id), &MqttPubAckMessage{PacketId: smp.Msg.id})
+		if smp.Msg.state == SMStatePublished {
+			pub := cl.toPub(smp.Msg)
+			cl.endpoint.Write(pub)
+			if smp.Msg.msg.QosLevel == MqttQoSLevel0 {
+				ctx.Send(sessionID(cl.id), &MqttPubAckMessage{PacketId: smp.Msg.id})
+			}
 		}
 
 	default:
-		fmt.Printf("received invalid message")
+		fmt.Printf("received invalid message: %T", t)
 		cl.endpoint.Close()
 	}
 }
@@ -192,8 +212,7 @@ func (cl *Client) onConnect(ctx hermes.Context, msg *MqttConnectMessage) {
 }
 
 func (cl *Client) onSubscribe(ctx hermes.Context, msg *MqttSubscribeMessage) (*MqttSubAckMessage, error) {
-	sid := sessionID(cl.id)
-	r, err := ctx.RequestWithTimeout(sid, msg, 1500*time.Millisecond)
+	r, err := ctx.RequestWithTimeout(cl.sid(), msg, ClientRequestTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -207,8 +226,7 @@ func (cl *Client) onSubscribe(ctx hermes.Context, msg *MqttSubscribeMessage) (*M
 }
 
 func (cl *Client) onUnsubscribe(ctx hermes.Context, msg *MqttUnsubscribeMessage) (*MqttUnSubAckMessage, error) {
-	sid := sessionID(cl.id)
-	r, err := ctx.RequestWithTimeout(sid, msg, 1500*time.Millisecond)
+	r, err := ctx.RequestWithTimeout(cl.sid(), msg, ClientRequestTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -222,8 +240,7 @@ func (cl *Client) onUnsubscribe(ctx hermes.Context, msg *MqttUnsubscribeMessage)
 }
 
 func (cl *Client) onPublish(ctx hermes.Context, msg *MqttPublishMessage) error {
-	sid := sessionID(cl.id)
-	r, err := ctx.RequestWithTimeout(sid, &SessionPublishRequest{Msg: msg}, 1500*time.Millisecond)
+	r, err := ctx.RequestWithTimeout(cl.sid(), &SessionPublishRequest{Msg: msg}, ClientRequestTimeout)
 	if err != nil {
 		return err
 	}
@@ -236,9 +253,36 @@ func (cl *Client) onPublish(ctx hermes.Context, msg *MqttPublishMessage) error {
 	return nil
 }
 
+func (cl *Client) onPubRec(ctx hermes.Context, pid MqttPacketId) error {
+	r, err := ctx.RequestWithTimeout(cl.sid(), &SessionPubRecRequest{PacketID: pid}, ClientRequestTimeout)
+	if err != nil {
+		return err
+	}
+
+	rep := r.Payload().(*SessionPubRecReply)
+	if rep.Err != nil {
+		return rep.Err
+	}
+
+	return nil
+}
+
+func (cl *Client) onPubComp(ctx hermes.Context, pid MqttPacketId) error {
+	r, err := ctx.RequestWithTimeout(cl.sid(), &SessionPubCompRequest{PacketID: pid}, ClientRequestTimeout)
+	if err != nil {
+		return err
+	}
+
+	rep := r.Payload().(*SessionPubCompReply)
+	if rep.Err != nil {
+		return rep.Err
+	}
+
+	return nil
+}
+
 func (cl *Client) onPubRel(ctx hermes.Context, msg *MqttPubRelMessage) error {
-	sid := sessionID(cl.id)
-	r, err := ctx.RequestWithTimeout(sid, &SessionPubRelRequest{PacketID: msg.PacketId}, 1500*time.Millisecond)
+	r, err := ctx.RequestWithTimeout(cl.sid(), &SessionPubRelRequest{PacketID: msg.PacketId}, ClientRequestTimeout)
 	if err != nil {
 		return err
 	}
@@ -253,7 +297,7 @@ func (cl *Client) onPubRel(ctx hermes.Context, msg *MqttPubRelMessage) error {
 
 func (cl *Client) register(ctx hermes.Context, id MqttClientId) (bool, error) {
 	sid := sessionID(id)
-	res, err := ctx.RequestWithTimeout(sid, &SessionRegisterRequest{ConsumerID: ctx.ID()}, 1500*time.Millisecond)
+	res, err := ctx.RequestWithTimeout(sid, &SessionRegisterRequest{ConsumerID: ctx.ID()}, ClientRequestTimeout)
 	if err != nil {
 		return false, err
 	}
@@ -264,11 +308,25 @@ func (cl *Client) register(ctx hermes.Context, id MqttClientId) (bool, error) {
 }
 
 func (cl *Client) clean(ctx hermes.Context, id MqttClientId) error {
-	sid := sessionID(id)
-	_, err := ctx.RequestWithTimeout(sid, &SessionCleanRequest{}, 1500*time.Millisecond)
+	_, err := ctx.RequestWithTimeout(cl.sid(), &SessionCleanRequest{}, ClientRequestTimeout)
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (cl *Client) sid() hermes.ReceiverID {
+	return sessionID(cl.id)
+}
+
+func (cl *Client) toPub(sm *SessionMessage) *MqttPublishMessage {
+	return &MqttPublishMessage{
+		TopicName: sm.msg.TopicName,
+		Payload:   sm.msg.Payload,
+		PacketId:  sm.id,
+		Duplicate: sm.sentCount > 1,
+		QosLevel:  sm.qos,
+		Retain:    false,
+	}
 }
