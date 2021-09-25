@@ -51,8 +51,11 @@ func TestPubSubQoS1(t *testing.T) {
 	waitPID(t, published, "expected message to be published")
 
 	published = c2.AssertMessageReceived(topic.topicName(), payload)
-	time.Sleep(SessionRepubTimeout + 1000*time.Millisecond)
-	waitPID(t, published, "expected message to be published")
+	time.Sleep(SessionRepubTimeout + 100*time.Millisecond)
+	pid := waitPID(t, published, "expected message to be published")
+
+	c2.PubAck(pid)
+	c2.AssertMessageNotReceived(SessionRepubTimeout + 100*time.Millisecond)
 }
 
 func TestPubSubQoS2(t *testing.T) {
@@ -224,6 +227,14 @@ func (tc *TestClient) AssertMessageNotReceived(timeout time.Duration) {
 		tc.t.Fatalf("did not expect message to be received")
 
 	case <-time.After(timeout):
+	}
+}
+
+func (tc *TestClient) PubAck(pid MqttPacketId) {
+	ack := &MqttPubAckMessage{PacketId: pid}
+	err := tc.net.Send("", clientID(tc.id), ack)
+	if err != nil {
+		tc.t.Fatalf("failed to send PUBCOMP: %s\n", err.Error())
 	}
 }
 

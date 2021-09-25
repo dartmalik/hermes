@@ -82,6 +82,13 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
 			cl.endpoint.Write(&MqttPubRecMessage{PacketId: pub.PacketId})
 		}
 
+	case *MqttPubAckMessage:
+		pa := msg.Payload().(*MqttPubAckMessage)
+		err := cl.onPubAck(ctx, pa.PacketId)
+		if err != nil {
+			cl.endpoint.Close()
+		}
+
 	case *MqttPubRecMessage:
 		pr := msg.Payload().(*MqttPubRecMessage)
 		err := cl.onPubRec(ctx, pr.PacketId)
@@ -252,6 +259,20 @@ func (cl *Client) onPublish(ctx hermes.Context, msg *MqttPublishMessage) error {
 	}
 
 	rep := r.Payload().(*SessionPublishReply)
+	if rep.Err != nil {
+		return rep.Err
+	}
+
+	return nil
+}
+
+func (cl *Client) onPubAck(ctx hermes.Context, pid MqttPacketId) error {
+	r, err := ctx.RequestWithTimeout(cl.sid(), &SessionPubAckRequest{PacketID: pid}, ClientRequestTimeout)
+	if err != nil {
+		return err
+	}
+
+	rep := r.Payload().(*SessionPubAckReply)
 	if rep.Err != nil {
 		return rep.Err
 	}

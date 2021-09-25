@@ -328,44 +328,6 @@ func (s *Session) onPubComp(ctx hermes.Context, pid MqttPacketId) error {
 	return nil
 }
 
-func (s *Session) ackMsg(ctx hermes.Context, pid MqttPacketId, qos MqttQoSLevel) error {
-	sid := string(ctx.ID())
-	sp, err := s.store.FetchLastInflightMessage(sid, SMStatePublished)
-	if err != nil {
-		return err
-	}
-
-	if sp.id != pid {
-		return errors.New("invalid_packet_id")
-	}
-	if sp.qos != qos {
-		return errors.New("invalid_packet_id")
-	}
-
-	if qos == MqttQoSLevel1 {
-		ok, err := s.store.RemoveMsg(sid, pid)
-		if !ok {
-			return errors.New("invalid_packet_id")
-		}
-		if err != nil {
-			return err
-		}
-
-		s.scheduleRepublish(ctx)
-	} else {
-		ok, err := s.store.AckMsg(sid, pid)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return errors.New("invalid_packet_id")
-		}
-		sp.sentAt = time.Now()
-	}
-
-	return nil
-}
-
 func (s *Session) onClean(ctx hermes.Context) error {
 	return s.store.Clean(string(ctx.ID()))
 }
@@ -437,6 +399,44 @@ func (s *Session) scheduleRepublish(ctx hermes.Context) {
 	}
 
 	s.repubTimer = t
+}
+
+func (s *Session) ackMsg(ctx hermes.Context, pid MqttPacketId, qos MqttQoSLevel) error {
+	sid := string(ctx.ID())
+	sp, err := s.store.FetchLastInflightMessage(sid, SMStatePublished)
+	if err != nil {
+		return err
+	}
+
+	if sp.id != pid {
+		return errors.New("invalid_packet_id")
+	}
+	if sp.qos != qos {
+		return errors.New("invalid_packet_id")
+	}
+
+	if qos == MqttQoSLevel1 {
+		ok, err := s.store.RemoveMsg(sid, pid)
+		if !ok {
+			return errors.New("invalid_packet_id")
+		}
+		if err != nil {
+			return err
+		}
+
+		s.scheduleRepublish(ctx)
+	} else {
+		ok, err := s.store.AckMsg(sid, pid)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("invalid_packet_id")
+		}
+		sp.sentAt = time.Now()
+	}
+
+	return nil
 }
 
 func (s *Session) reply(ctx hermes.Context, msg hermes.Message, payload interface{}) {
