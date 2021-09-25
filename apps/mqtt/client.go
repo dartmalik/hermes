@@ -133,6 +133,10 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
 			if smp.Msg.msg.QosLevel == MqttQoSLevel0 {
 				ctx.Send(sessionID(cl.id), &MqttPubAckMessage{PacketId: smp.Msg.id})
 			}
+		} else if smp.Msg.state == SMStateAcked {
+			if smp.Msg.qos == MqttQoSLevel2 {
+				cl.endpoint.Write(&MqttPubRelMessage{PacketId: smp.Msg.id})
+			}
 		}
 
 	default:

@@ -73,6 +73,8 @@ func TestPubSubQoS2(t *testing.T) {
 	pid := waitPID(t, published, "expected message to be published")
 
 	c2.PubRec(pid)
+	c2.PubComp(pid)
+	c2.AssertMessageNotReceived(SessionRepubTimeout + 100*time.Millisecond)
 }
 
 type TestEndpoint struct {
@@ -243,10 +245,18 @@ func (tc *TestClient) PubRec(pid MqttPacketId) {
 	ack := &MqttPubRecMessage{PacketId: pid}
 	err := tc.net.Send("", clientID(tc.id), ack)
 	if err != nil {
-		tc.t.Fatalf("failed to publish message: %s\n", err.Error())
+		tc.t.Fatalf("failed to send PUBREC: %s\n", err.Error())
 	}
 
 	waitBool(tc.t, gotAck, "expected PUBREC to be ack'd")
+}
+
+func (tc *TestClient) PubComp(pid MqttPacketId) {
+	ack := &MqttPubCompMessage{PacketId: pid}
+	err := tc.net.Send("", clientID(tc.id), ack)
+	if err != nil {
+		tc.t.Fatalf("failed to send PUBCOMP: %s\n", err.Error())
+	}
 }
 
 func (tc *TestClient) createEndpoint() {
