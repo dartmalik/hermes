@@ -28,6 +28,11 @@ type SessionMessage struct {
 	sentCount int
 }
 
+func (msg *SessionMessage) Sent() {
+	msg.sentCount++
+	msg.sentAt = time.Now()
+}
+
 type sessionState struct {
 	sub      map[MqttTopicFilter]*MqttSubscription
 	pub      *hermes.Queue
@@ -111,10 +116,6 @@ func (s *sessionState) fetchLastInflightMessage(state int) *SessionMessage {
 	return nil
 }
 
-func (s *sessionState) remove() {
-	s.outbox.Delete(s.outbox.Front().Key)
-}
-
 func (s *sessionState) removeMsg(pid MqttPacketId) bool {
 	return s.outbox.Delete(pid)
 }
@@ -160,7 +161,6 @@ type SessionStore interface {
 	AddSub(id string, subs []MqttSubscription) ([]MqttSubAckStatus, error)
 	RemoveSub(id string, filters []MqttTopicFilter) error
 	Append(id string, msg *MqttPublishMessage) error
-	Remove(id string) error
 	RemoveMsg(id string, pid MqttPacketId) (deleted bool, err error)
 	AckMsg(id string, pid MqttPacketId) (done bool, err error)
 	Clean(id string) error
@@ -221,17 +221,6 @@ func (store *InMemSessionStore) Append(id string, msg *MqttPublishMessage) error
 	}
 
 	return s.(*sessionState).append(msg)
-}
-
-func (store *InMemSessionStore) Remove(id string) error {
-	s, ok := store.sessions.Get(id)
-	if !ok {
-		return ErrSessionMissing
-	}
-
-	s.(*sessionState).remove()
-
-	return nil
 }
 
 func (store *InMemSessionStore) RemoveMsg(id string, pid MqttPacketId) (bool, error) {

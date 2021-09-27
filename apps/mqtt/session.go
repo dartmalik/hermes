@@ -373,8 +373,7 @@ func (s *Session) processOutbox(ctx hermes.Context) {
 }
 
 func (s *Session) send(ctx hermes.Context, msg *SessionMessage) {
-	msg.sentCount++
-	msg.sentAt = time.Now()
+	msg.Sent()
 	ctx.Send(s.consumer, &SessionMessagePublished{Msg: msg})
 }
 
