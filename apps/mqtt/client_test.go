@@ -46,14 +46,17 @@ func TestPubSubQoS1(t *testing.T) {
 
 	c2.Subscribe(topic, MqttQoSLevel1)
 
+	// validate that c2 receives publishes via topic
 	published := c2.AssertMessageReceived(topic.topicName(), payload)
 	c1.Publish(topic.topicName(), payload, MqttQoSLevel1)
 	waitPID(t, published, "expected message to be published")
 
+	// validate that messages are republished if not ack'd
 	published = c2.AssertMessageReceived(topic.topicName(), payload)
 	time.Sleep(SessionRepubTimeout + 100*time.Millisecond)
 	pid := waitPID(t, published, "expected message to be published")
 
+	// validat that messages are not republished after ack
 	c2.PubAck(pid)
 	c2.AssertMessageNotReceived(SessionRepubTimeout + 100*time.Millisecond)
 }
@@ -67,15 +70,19 @@ func TestPubSubQoS2(t *testing.T) {
 
 	c2.Subscribe(topic, MqttQoSLevel2)
 
+	// validate c2 receives messages published to topic
 	published := c2.AssertMessageReceived(topic.topicName(), payload)
 	c1.Publish(topic.topicName(), payload, MqttQoSLevel2)
 	waitPID(t, published, "expected message to be published")
 
+	// validate messages are republished if not ack'd
 	published = c2.AssertMessageReceived(topic.topicName(), payload)
 	time.Sleep(SessionRepubTimeout + 100*time.Millisecond)
 	pid := waitPID(t, published, "expected message to be published")
 
+	// ack the message
 	c2.PubRec(pid)
+	// TODO: validate that PUBREL is republished on timeout
 	c2.PubComp(pid)
 	c2.AssertMessageNotReceived(SessionRepubTimeout + 100*time.Millisecond)
 }
