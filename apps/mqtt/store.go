@@ -11,6 +11,7 @@ import (
 )
 
 var ErrSessionMissing = errors.New("missing_session")
+var ErrSessionMissingMsg = errors.New("missing_message")
 
 const (
 	SMStateQueued = iota
@@ -136,6 +137,19 @@ func (s *sessionState) ackMsg(pid MqttPacketId) bool {
 	return true
 }
 
+func (s *sessionState) sentMsg(pid MqttPacketId) error {
+	i, ok := s.outbox.Get(pid)
+	if !ok {
+		return ErrSessionMissingMsg
+	}
+
+	sm := i.(*SessionMessage)
+	sm.sentCount++
+	sm.sentAt = time.Now()
+
+	return nil
+}
+
 func (s *sessionState) inflightCap() int {
 	return SessionMaxOutboxSize - s.outbox.Len()
 }
@@ -163,6 +177,7 @@ type SessionStore interface {
 	AppendMsg(id string, msg *MqttPublishMessage) error
 	RemoveMsg(id string, pid MqttPacketId) (deleted bool, err error)
 	AckMsg(id string, pid MqttPacketId) (done bool, err error)
+	SentMsg(id string, pid MqttPacketId) error
 	Clean(id string) error
 	FetchNewMessages(id string) ([]*SessionMessage, error)
 	FetchLastInflightMessage(id string, state int) (*SessionMessage, error)
@@ -239,6 +254,15 @@ func (store *InMemSessionStore) AckMsg(id string, pid MqttPacketId) (bool, error
 	}
 
 	return s.(*sessionState).ackMsg(pid), nil
+}
+
+func (store *InMemSessionStore) SentMsg(id string, pid MqttPacketId) error {
+	s, ok := store.sessions.Get(id)
+	if !ok {
+		return ErrSessionMissing
+	}
+
+	return s.(*sessionState).sentMsg(pid)
 }
 
 func (store *InMemSessionStore) Clean(id string) error {
