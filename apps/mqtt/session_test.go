@@ -219,11 +219,11 @@ func testPublishProcess(t *testing.T, ctx *TestContext, s *Session, topic MqttTo
 		}
 
 		m := smp.Msg
-		if m.msg.TopicName != topic {
-			t.Fatalf("expected message to be published to %s but got %s", topic, m.msg.TopicName)
+		if m.Topic() != topic {
+			t.Fatalf("expected message to be published to %s but got %s", topic, m.Topic())
 		}
-		if string(m.msg.Payload) != pub {
-			t.Fatalf("expected %s payload but got %s", pub, string(m.msg.Payload))
+		if string(m.Payload()) != pub {
+			t.Fatalf("expected %s payload but got %s", pub, string(m.Payload()))
 		}
 
 		sent = true

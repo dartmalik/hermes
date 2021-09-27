@@ -91,7 +91,7 @@ type SessionCleanReply struct {
 
 // events
 type SessionMessagePublished struct {
-	Msg *SessionMessage
+	Msg SessionMessage
 }
 
 type sessionProcessPublishes struct{}
@@ -308,10 +308,10 @@ func (s *Session) onPubComp(ctx hermes.Context, pid MqttPacketId) error {
 		return err
 	}
 
-	if sp.id != pid {
+	if sp.ID() != pid {
 		return errors.New("invalid_packet_id")
 	}
-	if sp.qos != MqttQoSLevel2 {
+	if sp.QoS() != MqttQoSLevel2 {
 		return errors.New("invalid_packet_id")
 	}
 
@@ -372,8 +372,8 @@ func (s *Session) processOutbox(ctx hermes.Context) {
 	s.scheduleRepublish(ctx)
 }
 
-func (s *Session) send(ctx hermes.Context, msg *SessionMessage) {
-	s.store.SentMsg(string(ctx.ID()), msg.id)
+func (s *Session) send(ctx hermes.Context, msg SessionMessage) {
+	s.store.SentMsg(string(ctx.ID()), msg.ID())
 	ctx.Send(s.consumer, &SessionMessagePublished{Msg: msg})
 }
 
@@ -407,10 +407,10 @@ func (s *Session) ackMsg(ctx hermes.Context, pid MqttPacketId, qos MqttQoSLevel)
 		return err
 	}
 
-	if sp.id != pid {
+	if sp.ID() != pid {
 		return errors.New("invalid_packet_id")
 	}
-	if sp.qos != qos {
+	if sp.QoS() != qos {
 		return errors.New("invalid_packet_id")
 	}
 
@@ -432,7 +432,6 @@ func (s *Session) ackMsg(ctx hermes.Context, pid MqttPacketId, qos MqttQoSLevel)
 		if !ok {
 			return errors.New("invalid_packet_id")
 		}
-		sp.sentAt = time.Now()
 	}
 
 	return nil
@@ -476,12 +475,12 @@ func (s *Session) topicNames(filters []MqttTopicFilter) []MqttTopicName {
 	return topics
 }
 
-func (s *Session) hasTimeout(msg *SessionMessage) bool {
-	return msg.sentAt.Add(s.repubTimeout).Before(time.Now())
+func (s *Session) hasTimeout(msg SessionMessage) bool {
+	return msg.SentAt().Add(s.repubTimeout).Before(time.Now())
 }
 
-func (s *Session) timeout(msg *SessionMessage) time.Duration {
-	t := time.Until(msg.sentAt.Add(s.repubTimeout))
+func (s *Session) timeout(msg SessionMessage) time.Duration {
+	t := time.Until(msg.SentAt().Add(s.repubTimeout))
 	if t < 0 {
 		return 0
 	}

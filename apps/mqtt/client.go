@@ -134,15 +134,15 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
 
 	case *SessionMessagePublished:
 		smp := msg.Payload().(*SessionMessagePublished)
-		if smp.Msg.state == SMStatePublished {
+		if smp.Msg.State() == SMStatePublished {
 			pub := cl.toPub(smp.Msg)
 			cl.endpoint.Write(pub)
-			if smp.Msg.msg.QosLevel == MqttQoSLevel0 {
-				ctx.Send(sessionID(cl.id), &MqttPubAckMessage{PacketId: smp.Msg.id})
+			if smp.Msg.QoS() == MqttQoSLevel0 {
+				ctx.Send(sessionID(cl.id), &MqttPubAckMessage{PacketId: smp.Msg.ID()})
 			}
-		} else if smp.Msg.state == SMStateAcked {
-			if smp.Msg.qos == MqttQoSLevel2 {
-				cl.endpoint.Write(&MqttPubRelMessage{PacketId: smp.Msg.id})
+		} else if smp.Msg.State() == SMStateAcked {
+			if smp.Msg.QoS() == MqttQoSLevel2 {
+				cl.endpoint.Write(&MqttPubRelMessage{PacketId: smp.Msg.ID()})
 			} else {
 				cl.endpoint.Close()
 			}
@@ -347,13 +347,13 @@ func (cl *Client) sid() hermes.ReceiverID {
 	return sessionID(cl.id)
 }
 
-func (cl *Client) toPub(sm *SessionMessage) *MqttPublishMessage {
+func (cl *Client) toPub(sm SessionMessage) *MqttPublishMessage {
 	return &MqttPublishMessage{
-		TopicName: sm.msg.TopicName,
-		Payload:   sm.msg.Payload,
-		PacketId:  sm.id,
-		Duplicate: sm.sentCount > 1,
-		QosLevel:  sm.qos,
+		TopicName: sm.Topic(),
+		Payload:   sm.Payload(),
+		PacketId:  sm.ID(),
+		Duplicate: sm.SentCount() > 1,
+		QosLevel:  sm.QoS(),
 		Retain:    false,
 	}
 }

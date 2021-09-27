@@ -20,7 +20,17 @@ const (
 	SMStateAny
 )
 
-type SessionMessage struct {
+type SessionMessage interface {
+	ID() MqttPacketId
+	QoS() MqttQoSLevel
+	Payload() []byte
+	State() int
+	SentAt() time.Time
+	SentCount() int
+	Topic() MqttTopicName
+}
+
+type sessionMessage struct {
 	id        MqttPacketId
 	qos       MqttQoSLevel
 	msg       *MqttPublishMessage
@@ -29,9 +39,37 @@ type SessionMessage struct {
 	sentCount int
 }
 
-func (msg *SessionMessage) Sent() {
-	msg.sentCount++
-	msg.sentAt = time.Now()
+func (sm *sessionMessage) ID() MqttPacketId {
+	return sm.id
+}
+
+func (sm *sessionMessage) QoS() MqttQoSLevel {
+	return sm.qos
+}
+
+func (sm *sessionMessage) Payload() []byte {
+	return sm.msg.Payload
+}
+
+func (sm *sessionMessage) State() int {
+	return sm.state
+}
+
+func (sm *sessionMessage) SentAt() time.Time {
+	return sm.sentAt
+}
+
+func (sm *sessionMessage) SentCount() int {
+	return sm.sentCount
+}
+
+func (sm *sessionMessage) Topic() MqttTopicName {
+	return sm.msg.TopicName
+}
+
+func (sm *sessionMessage) Sent() {
+	sm.sentCount++
+	sm.sentAt = time.Now()
 }
 
 type sessionState struct {
@@ -76,7 +114,7 @@ func (state *sessionState) unsubscribe(filters []MqttTopicFilter) {
 func (state *sessionState) append(msg *MqttPublishMessage) error {
 	for _, s := range state.sub {
 		if s.TopicFilter.topicName() == msg.TopicName {
-			sm := &SessionMessage{msg: msg, qos: s.QosLevel}
+			sm := &sessionMessage{msg: msg, qos: s.QosLevel}
 			_, err := state.pub.Add(sm)
 			if err != nil {
 				return err
@@ -87,12 +125,12 @@ func (state *sessionState) append(msg *MqttPublishMessage) error {
 	return nil
 }
 
-func (s *sessionState) fetchNewMessages() []*SessionMessage {
+func (s *sessionState) fetchNewMessages() []SessionMessage {
 	cap := s.inflightCap()
-	msgs := make([]*SessionMessage, 0, cap)
+	msgs := make([]SessionMessage, 0, cap)
 
 	for mi := 0; mi < cap && s.pub.Size() > 0; mi++ {
-		sm := s.pub.Remove().(*SessionMessage)
+		sm := s.pub.Remove().(*sessionMessage)
 		sm.id, sm.sentAt = s.nextPacketId(), time.Now()
 		sm.state = SMStatePublished
 
@@ -106,9 +144,9 @@ func (s *sessionState) fetchNewMessages() []*SessionMessage {
 	return msgs
 }
 
-func (s *sessionState) fetchLastInflightMessage(state int) *SessionMessage {
+func (s *sessionState) fetchLastInflightMessage(state int) SessionMessage {
 	for e := s.outbox.Front(); e != nil; e = e.Next() {
-		sm := e.Value.(*SessionMessage)
+		sm := e.Value.(*sessionMessage)
 		if sm.state == state || state == SMStateAny {
 			return sm
 		}
@@ -127,12 +165,13 @@ func (s *sessionState) ackMsg(pid MqttPacketId) bool {
 		return false
 	}
 
-	sm := i.(*SessionMessage)
+	sm := i.(*sessionMessage)
 	if sm.state != SMStatePublished {
 		return false
 	}
 
 	sm.state = SMStateAcked
+	sm.sentAt = time.Now()
 
 	return true
 }
@@ -143,7 +182,7 @@ func (s *sessionState) sentMsg(pid MqttPacketId) error {
 		return ErrSessionMissingMsg
 	}
 
-	sm := i.(*SessionMessage)
+	sm := i.(*sessionMessage)
 	sm.sentCount++
 	sm.sentAt = time.Now()
 
@@ -179,8 +218,8 @@ type SessionStore interface {
 	AckMsg(id string, pid MqttPacketId) (done bool, err error)
 	SentMsg(id string, pid MqttPacketId) error
 	Clean(id string) error
-	FetchNewMessages(id string) ([]*SessionMessage, error)
-	FetchLastInflightMessage(id string, state int) (*SessionMessage, error)
+	FetchNewMessages(id string) ([]SessionMessage, error)
+	FetchLastInflightMessage(id string, state int) (SessionMessage, error)
 	IsEmpty(id string) (bool, error)
 }
 
@@ -276,7 +315,7 @@ func (store *InMemSessionStore) Clean(id string) error {
 	return nil
 }
 
-func (store *InMemSessionStore) FetchNewMessages(id string) ([]*SessionMessage, error) {
+func (store *InMemSessionStore) FetchNewMessages(id string) ([]SessionMessage, error) {
 	s, ok := store.sessions.Get(id)
 	if !ok {
 		return nil, ErrSessionMissing
@@ -285,7 +324,7 @@ func (store *InMemSessionStore) FetchNewMessages(id string) ([]*SessionMessage, 
 	return s.(*sessionState).fetchNewMessages(), nil
 }
 
-func (store *InMemSessionStore) FetchLastInflightMessage(id string, state int) (*SessionMessage, error) {
+func (store *InMemSessionStore) FetchLastInflightMessage(id string, state int) (SessionMessage, error) {
 	s, ok := store.sessions.Get(id)
 	if !ok {
 		return nil, ErrSessionMissing
