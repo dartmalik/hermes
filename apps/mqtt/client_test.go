@@ -363,7 +363,11 @@ func recvFactory(id hermes.ReceiverID) (hermes.Receiver, error) {
 
 		return s.recv, nil
 	} else if IsPubSubID(id) {
-		return NewPubSub().recv, nil
+		p, err := NewPubSub(NewInMemMsgStore())
+		if err != nil {
+			return nil, err
+		}
+		return p.recv, nil
 	}
 
 	return nil, errors.New("unknown_receiver")
