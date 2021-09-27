@@ -290,7 +290,7 @@ func (s *Session) onPubRel(ctx hermes.Context, pid MqttPacketId) error {
 }
 
 func (s *Session) onStoreMessage(ctx hermes.Context, msg *MqttPublishMessage) error {
-	return s.store.Append(string(ctx.ID()), msg)
+	return s.store.AppendMsg(string(ctx.ID()), msg)
 }
 
 func (s *Session) onPubAck(ctx hermes.Context, msg *SessionPubAckRequest) error {

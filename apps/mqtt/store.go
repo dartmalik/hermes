@@ -160,7 +160,7 @@ type SessionStore interface {
 	Create(id string) (present bool, err error)
 	AddSub(id string, subs []MqttSubscription) ([]MqttSubAckStatus, error)
 	RemoveSub(id string, filters []MqttTopicFilter) error
-	Append(id string, msg *MqttPublishMessage) error
+	AppendMsg(id string, msg *MqttPublishMessage) error
 	RemoveMsg(id string, pid MqttPacketId) (deleted bool, err error)
 	AckMsg(id string, pid MqttPacketId) (done bool, err error)
 	Clean(id string) error
