@@ -210,7 +210,7 @@ func (store *InMemSessionStore) RemoveSub(id string, filters []MqttTopicFilter) 
 	return nil
 }
 
-func (store *InMemSessionStore) Append(id string, msg *MqttPublishMessage) error {
+func (store *InMemSessionStore) AppendMsg(id string, msg *MqttPublishMessage) error {
 	if msg == nil {
 		return errors.New("invalid_message")
 	}
