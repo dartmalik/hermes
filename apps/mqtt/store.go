@@ -210,17 +210,17 @@ func (s *sessionState) nextPacketId() MqttPacketId {
 }
 
 type SessionStore interface {
-	Create(id string) (present bool, err error)
-	AddSub(id string, subs []MqttSubscription) ([]MqttSubAckStatus, error)
-	RemoveSub(id string, filters []MqttTopicFilter) error
-	AppendMsg(id string, msg *MqttPublishMessage) error
-	RemoveMsg(id string, pid MqttPacketId) (deleted bool, err error)
-	AckMsg(id string, pid MqttPacketId) (done bool, err error)
-	SentMsg(id string, pid MqttPacketId) error
-	Clean(id string) error
-	FetchNewMessages(id string) ([]SessionMessage, error)
-	FetchLastInflightMessage(id string, state int) (SessionMessage, error)
-	IsEmpty(id string) (bool, error)
+	Create(sid string) (present bool, err error)
+	AddSub(sid string, subs []MqttSubscription) ([]MqttSubAckStatus, error)
+	RemoveSub(sid string, filters []MqttTopicFilter) error
+	AppendMsg(sid string, msg *MqttPublishMessage) error
+	RemoveMsg(sid string, pid MqttPacketId) (deleted bool, err error)
+	AckMsg(sid string, pid MqttPacketId) (done bool, err error)
+	SentMsg(sid string, pid MqttPacketId) error
+	Clean(sid string) error
+	FetchNewMessages(sid string) ([]SessionMessage, error)
+	FetchLastInflightMessage(sid string, state int) (SessionMessage, error)
+	IsEmpty(sid string) (bool, error)
 }
 
 type InMemSessionStore struct {
@@ -231,12 +231,12 @@ func NewInMemSessionStore() *InMemSessionStore {
 	return &InMemSessionStore{sessions: hermes.NewSyncMap()}
 }
 
-func (store *InMemSessionStore) Create(id string) (bool, error) {
-	if _, ok := store.sessions.Get(id); ok {
+func (store *InMemSessionStore) Create(sid string) (bool, error) {
+	if _, ok := store.sessions.Get(sid); ok {
 		return true, nil
 	}
 
-	err := store.sessions.Put(id, newSessionState(), false)
+	err := store.sessions.Put(sid, newSessionState(), false)
 	if err == hermes.ErrMapElementAlreadyExists {
 		return false, nil
 	}
@@ -244,8 +244,8 @@ func (store *InMemSessionStore) Create(id string) (bool, error) {
 	return false, nil
 }
 
-func (store *InMemSessionStore) AddSub(id string, subs []MqttSubscription) ([]MqttSubAckStatus, error) {
-	s, ok := store.sessions.Get(id)
+func (store *InMemSessionStore) AddSub(sid string, subs []MqttSubscription) ([]MqttSubAckStatus, error) {
+	s, ok := store.sessions.Get(sid)
 	if !ok {
 		return nil, ErrSessionMissing
 	}
@@ -253,8 +253,8 @@ func (store *InMemSessionStore) AddSub(id string, subs []MqttSubscription) ([]Mq
 	return s.(*sessionState).subscribe(subs)
 }
 
-func (store *InMemSessionStore) RemoveSub(id string, filters []MqttTopicFilter) error {
-	s, ok := store.sessions.Get(id)
+func (store *InMemSessionStore) RemoveSub(sid string, filters []MqttTopicFilter) error {
+	s, ok := store.sessions.Get(sid)
 	if !ok {
 		return ErrSessionMissing
 	}
@@ -264,12 +264,12 @@ func (store *InMemSessionStore) RemoveSub(id string, filters []MqttTopicFilter) 
 	return nil
 }
 
-func (store *InMemSessionStore) AppendMsg(id string, msg *MqttPublishMessage) error {
+func (store *InMemSessionStore) AppendMsg(sid string, msg *MqttPublishMessage) error {
 	if msg == nil {
 		return errors.New("invalid_message")
 	}
 
-	s, ok := store.sessions.Get(id)
+	s, ok := store.sessions.Get(sid)
 	if !ok {
 		return ErrSessionMissing
 	}
@@ -277,8 +277,8 @@ func (store *InMemSessionStore) AppendMsg(id string, msg *MqttPublishMessage) er
 	return s.(*sessionState).append(msg)
 }
 
-func (store *InMemSessionStore) RemoveMsg(id string, pid MqttPacketId) (bool, error) {
-	s, ok := store.sessions.Get(id)
+func (store *InMemSessionStore) RemoveMsg(sid string, pid MqttPacketId) (bool, error) {
+	s, ok := store.sessions.Get(sid)
 	if !ok {
 		return false, ErrSessionMissing
 	}
@@ -286,8 +286,8 @@ func (store *InMemSessionStore) RemoveMsg(id string, pid MqttPacketId) (bool, er
 	return s.(*sessionState).removeMsg(pid), nil
 }
 
-func (store *InMemSessionStore) AckMsg(id string, pid MqttPacketId) (bool, error) {
-	s, ok := store.sessions.Get(id)
+func (store *InMemSessionStore) AckMsg(sid string, pid MqttPacketId) (bool, error) {
+	s, ok := store.sessions.Get(sid)
 	if !ok {
 		return false, ErrSessionMissing
 	}
@@ -295,8 +295,8 @@ func (store *InMemSessionStore) AckMsg(id string, pid MqttPacketId) (bool, error
 	return s.(*sessionState).ackMsg(pid), nil
 }
 
-func (store *InMemSessionStore) SentMsg(id string, pid MqttPacketId) error {
-	s, ok := store.sessions.Get(id)
+func (store *InMemSessionStore) SentMsg(sid string, pid MqttPacketId) error {
+	s, ok := store.sessions.Get(sid)
 	if !ok {
 		return ErrSessionMissing
 	}
@@ -304,8 +304,8 @@ func (store *InMemSessionStore) SentMsg(id string, pid MqttPacketId) error {
 	return s.(*sessionState).sentMsg(pid)
 }
 
-func (store *InMemSessionStore) Clean(id string) error {
-	s, ok := store.sessions.Get(id)
+func (store *InMemSessionStore) Clean(sid string) error {
+	s, ok := store.sessions.Get(sid)
 	if !ok {
 		return ErrSessionMissing
 	}
@@ -315,8 +315,8 @@ func (store *InMemSessionStore) Clean(id string) error {
 	return nil
 }
 
-func (store *InMemSessionStore) FetchNewMessages(id string) ([]SessionMessage, error) {
-	s, ok := store.sessions.Get(id)
+func (store *InMemSessionStore) FetchNewMessages(sid string) ([]SessionMessage, error) {
+	s, ok := store.sessions.Get(sid)
 	if !ok {
 		return nil, ErrSessionMissing
 	}
@@ -324,8 +324,8 @@ func (store *InMemSessionStore) FetchNewMessages(id string) ([]SessionMessage, e
 	return s.(*sessionState).fetchNewMessages(), nil
 }
 
-func (store *InMemSessionStore) FetchLastInflightMessage(id string, state int) (SessionMessage, error) {
-	s, ok := store.sessions.Get(id)
+func (store *InMemSessionStore) FetchLastInflightMessage(sid string, state int) (SessionMessage, error) {
+	s, ok := store.sessions.Get(sid)
 	if !ok {
 		return nil, ErrSessionMissing
 	}
@@ -333,8 +333,8 @@ func (store *InMemSessionStore) FetchLastInflightMessage(id string, state int) (
 	return s.(*sessionState).fetchLastInflightMessage(state), nil
 }
 
-func (store *InMemSessionStore) IsEmpty(id string) (bool, error) {
-	s, ok := store.sessions.Get(id)
+func (store *InMemSessionStore) IsEmpty(sid string) (bool, error) {
+	s, ok := store.sessions.Get(sid)
 	if !ok {
 		return false, ErrSessionMissing
 	}

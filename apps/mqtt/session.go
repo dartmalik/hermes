@@ -101,7 +101,7 @@ var SessionProcessPublishes = &sessionProcessPublishes{}
 type Session struct {
 	consumer     hermes.ReceiverID
 	store        SessionStore
-	inbox        *orderedmap.OrderedMap
+	inbox        *orderedmap.OrderedMap // TODO: move into store?
 	repubTimer   hermes.Timer
 	repubTimeout time.Duration
 }
