@@ -343,3 +343,40 @@ func (store *InMemSessionStore) IsEmpty(sid string) (bool, error) {
 
 	return st.pub.Size() <= 0 || st.inflightCap() <= 0, nil
 }
+
+type PollResult struct {
+	Msgs   []*MqttPublishMessage
+	Offset []byte
+}
+
+type MsgStore interface {
+	Put(msg *MqttPublishMessage) error
+	Poll(offset []byte) (*PollResult, error)
+}
+
+type InMemMsgStore struct {
+	msgs *hermes.Queue
+}
+
+func NewInMemMsgStore() *InMemMsgStore {
+	return &InMemMsgStore{msgs: hermes.NewQueue()}
+}
+
+func (store *InMemMsgStore) Put(msg *MqttPublishMessage) error {
+	if msg == nil {
+		return errors.New("invalid_message")
+	}
+
+	_, err := store.msgs.Add(msg)
+
+	return err
+}
+
+func (store *InMemMsgStore) Poll(offset []byte) (*PollResult, error) {
+	res := &PollResult{Msgs: make([]*MqttPublishMessage, 0, 1024)}
+	for len(res.Msgs) < cap(res.Msgs) && store.msgs.Size() > 0 {
+		res.Msgs = append(res.Msgs, store.msgs.Remove().(*MqttPublishMessage))
+	}
+
+	return res, nil
+}
