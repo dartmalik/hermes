@@ -1,5 +1,18 @@
+# TODO
+### mqtt
+* implement PUBSUB
+* implement retained messages
+* integrate logging
+* implement plug-in system (sends and requests)
+    * add auth plug-in
+    * add LWT message plug-in
+    * add presence plug-in
+* integrate configuration
+* implement Redis-based stores
+* add support for clustering (using remoting and redis)
+
 # concepts
-#### hermes
+### hermes
 - a collection of networks (inter-network) that connects senders with receivers
 
 #### subnet
@@ -13,10 +26,10 @@
 - allow receivers to setup timers and tickers
 - determine if parent-child relations should be supported (in a cluster only the root should be partitioned)
 
-#### quality
+### quality
 - add functional tests
 - add benchmark tests
 
-#### optimizations
+### optimizations
 - improve queue memory mangement
 - workers should signal executor after idle timeout (rather than locking and clearing the list)

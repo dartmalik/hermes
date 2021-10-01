@@ -74,7 +74,7 @@ func (ps *PubSub) recv(ctx hermes.Context, msg hermes.Message) {
 
 	case *PubSubSubscribeRequest:
 		psr := msg.Payload().(*PubSubSubscribeRequest)
-		err := ps.onSubscribe(psr.SubscriberID, psr.Topics)
+		err := ps.onSubscribe(ctx, psr.SubscriberID, psr.Topics)
 		ctx.Reply(msg, &PubSubSubscribeReply{err: err})
 
 	case *PubSubUnsubscribeRequest:
@@ -92,7 +92,7 @@ func (ps *PubSub) recv(ctx hermes.Context, msg hermes.Message) {
 	}
 }
 
-func (ps *PubSub) onSubscribe(id hermes.ReceiverID, topics []MqttTopicName) error {
+func (ps *PubSub) onSubscribe(ctx hermes.Context, id hermes.ReceiverID, topics []MqttTopicName) error {
 	if id == "" {
 		return errors.New("invalid_receiver_id")
 	}
@@ -103,8 +103,20 @@ func (ps *PubSub) onSubscribe(id hermes.ReceiverID, topics []MqttTopicName) erro
 		return nil
 	}
 
+	subTopics := make([]MqttTopicName, len(topics))
 	for _, t := range topics {
-		ps.receivers(t)[id] = true
+		recv := ps.receivers(t)
+		if _, ok := recv[id]; ok {
+			continue
+		}
+
+		recv[id] = true
+		subTopics = append(subTopics, t)
+	}
+
+	err := ps.sendRetainedMsgs(ctx, id, subTopics)
+	if err != nil {
+		fmt.Printf("[ERROR] failed to publish retained messages")
 	}
 
 	return nil
@@ -176,6 +188,27 @@ func (ps *PubSub) scheduleProcess(ctx hermes.Context) {
 	} else {
 		ps.pollTimer.Reset(PollTimeoutDur)
 	}
+}
+
+func (ps *PubSub) sendRetainedMsgs(ctx hermes.Context, id hermes.ReceiverID, topics []MqttTopicName) error {
+	if len(topics) <= 0 {
+		return nil
+	}
+
+	rms, err := ps.msgs.Get(topics)
+	if err != nil {
+		return err
+	}
+
+	for _, m := range rms {
+		ev := &PubSubMessagePublished{msg: m}
+		err = ctx.Send(id, ev)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (ps *PubSub) receivers(topic MqttTopicName) map[hermes.ReceiverID]bool {

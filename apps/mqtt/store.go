@@ -351,15 +351,20 @@ type PollResult struct {
 
 type MsgStore interface {
 	Put(msg *MqttPublishMessage) error
+	Get(topics []MqttTopicName) ([]*MqttPublishMessage, error)
 	Poll(offset []byte) (*PollResult, error)
 }
 
 type InMemMsgStore struct {
-	msgs *hermes.Queue
+	msgs     *hermes.Queue
+	retained *hermes.SyncMap
 }
 
 func NewInMemMsgStore() *InMemMsgStore {
-	return &InMemMsgStore{msgs: hermes.NewQueue()}
+	return &InMemMsgStore{
+		msgs:     hermes.NewQueue(),
+		retained: hermes.NewSyncMap(),
+	}
 }
 
 func (store *InMemMsgStore) Put(msg *MqttPublishMessage) error {
@@ -368,8 +373,37 @@ func (store *InMemMsgStore) Put(msg *MqttPublishMessage) error {
 	}
 
 	_, err := store.msgs.Add(msg)
+	if err != nil {
+		return err
+	}
+
+	if msg.Retain {
+		err = store.retained.Put(string(msg.TopicName), msg, true)
+		if err != nil {
+			return err
+		}
+	}
 
 	return err
+}
+
+func (store *InMemMsgStore) Get(topics []MqttTopicName) ([]*MqttPublishMessage, error) {
+	if len(topics) == 0 {
+		return nil, errors.New("invalid_topics")
+	}
+
+	msgs := make([]*MqttPublishMessage, 0, len(topics))
+
+	for _, t := range topics {
+		mi, ok := store.retained.Get(string(t))
+		if !ok {
+			msgs = append(msgs, nil)
+		} else {
+			msgs = append(msgs, mi.(*MqttPublishMessage))
+		}
+	}
+
+	return msgs, nil
 }
 
 func (store *InMemMsgStore) Poll(offset []byte) (*PollResult, error) {
