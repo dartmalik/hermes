@@ -50,6 +50,8 @@ type MqttConnectMessage struct {
 	clientId      MqttClientId
 	username      string
 	password      string
+	willTopic     MqttTopicName
+	willMsg       []byte
 }
 
 func (m *MqttConnectMessage) Reserved() bool {
