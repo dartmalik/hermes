@@ -8,9 +8,9 @@ type MqttQoSLevel int
 
 const (
 	MqttQoSLevel0     MqttQoSLevel = 0
-	MqttQoSLevel1                  = 1
-	MqttQoSLevel2                  = 2
-	MqttQosLevelCount              = 3
+	MqttQoSLevel1     MqttQoSLevel = 1
+	MqttQoSLevel2     MqttQoSLevel = 2
+	MqttQosLevelCount MqttQoSLevel = 3
 )
 
 type MqttTopicName string
@@ -215,24 +215,4 @@ type MqttUnsubscribeMessage struct {
 
 type MqttUnSubAckMessage struct {
 	PacketId MqttPacketId
-}
-
-type MqttCodecHandler struct {
-	// decoder in
-	inStreamChan chan []byte
-
-	// decoder out
-	outPublishChan    chan *MqttPublishMessage
-	outPubAckChan     chan *MqttPubAckMessage
-	outSubscribeChan  chan *MqttSubscribeMessage
-	outUnsubscibeChan chan *MqttUnsubscribeMessage
-
-	// encoder out
-	outStreamChan chan []byte
-
-	// encoder in
-	inPublishChan  chan *MqttPublishMessage
-	inPubAckChan   chan *MqttPubAckMessage
-	inSubAckChan   chan *MqttSubAckMessage
-	inUnsubAckChan chan *MqttUnSubAckMessage
 }
