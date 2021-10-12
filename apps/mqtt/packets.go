@@ -1,6 +1,9 @@
 package mqtt
 
-import "strings"
+import (
+	"errors"
+	"strings"
+)
 
 type MqttClientId string
 
@@ -13,7 +16,19 @@ const (
 	MqttQosLevelCount MqttQoSLevel = 3
 )
 
+var (
+	ErrInvalidTopicName = errors.New("invalid_topic_name")
+)
+
 type MqttTopicName string
+
+func NewTopicName(value string) (MqttTopicName, error) {
+	if strings.ContainsAny(value, "#+") {
+		return "", ErrInvalidTopicName
+	}
+
+	return MqttTopicName(value), nil
+}
 
 type MqttTopicFilter string
 
@@ -166,7 +181,7 @@ type MqttSubscription struct {
 
 type MqttSubscribeMessage struct {
 	PacketId      MqttPacketId
-	Subscriptions []MqttSubscription
+	Subscriptions []*MqttSubscription
 }
 
 func (m *MqttSubscribeMessage) topicFilter() []MqttTopicFilter {

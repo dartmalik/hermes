@@ -182,7 +182,7 @@ func testSubscribeTopic(t *testing.T, ctx *TestContext, s *Session, topic MqttTo
 		replied = true
 		return nil
 	}
-	subs := []MqttSubscription{
+	subs := []*MqttSubscription{
 		{QosLevel: MqttQoSLevel1, TopicFilter: MqttTopicFilter(topic)},
 	}
 	s.recv(ctx, messageOf(&MqttSubscribeMessage{PacketId: 1, Subscriptions: subs}))

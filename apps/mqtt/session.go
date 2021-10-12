@@ -15,7 +15,7 @@ const (
 	SessionIDPrefix      = "/sessions/"
 )
 
-func isSessionID(id hermes.ReceiverID) bool {
+func IsSessionID(id hermes.ReceiverID) bool {
 	return strings.HasPrefix(string(id), SessionIDPrefix)
 }
 
@@ -104,6 +104,15 @@ type Session struct {
 	inbox        *orderedmap.OrderedMap // TODO: move into store?
 	repubTimer   hermes.Timer
 	repubTimeout time.Duration
+}
+
+func NewSessionRecv(store SessionStore, repubTimeout time.Duration) (func(hermes.Context, hermes.Message), error) {
+	s, err := newSession(store, repubTimeout)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.recv, nil
 }
 
 func newSession(store SessionStore, repubTimeout time.Duration) (*Session, error) {

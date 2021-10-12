@@ -19,12 +19,12 @@ type Endpoint interface {
 	Close()
 }
 
-func isClientID(id hermes.ReceiverID) bool {
+func IsClientID(id hermes.ReceiverID) bool {
 	return strings.HasPrefix(string(id), ClientIDPrefix)
 }
 
-func clientID(id MqttClientId) hermes.ReceiverID {
-	return hermes.ReceiverID(ClientIDPrefix + string(id))
+func clientID(id string) hermes.ReceiverID {
+	return hermes.ReceiverID(ClientIDPrefix + id)
 }
 
 type MqttKeepAliveTimeout struct{}
@@ -54,7 +54,11 @@ type Client struct {
 	keepaliveTimer hermes.Timer
 }
 
-func newClient() *Client {
+func NewClientRecv() func(hermes.Context, hermes.Message) {
+	return NewClient().preConnectRecv
+}
+
+func NewClient() *Client {
 	return &Client{}
 }
 

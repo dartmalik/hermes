@@ -144,7 +144,7 @@ func (tc *TestClient) Subscribe(filter MqttTopicFilter, qos MqttQoSLevel) {
 	}
 
 	sub := createSubscribe(pid, filter, qos)
-	err := tc.net.Send("", clientID(tc.id), sub)
+	err := tc.net.Send("", clientID(string(tc.id)), sub)
 	if err != nil {
 		tc.t.Fatalf("failed to subscribe to topic: %s\n", err.Error())
 	}
@@ -189,7 +189,7 @@ func (tc *TestClient) Publish(topic MqttTopicName, payload string, qos MqttQoSLe
 	}
 
 	pub := &MqttPublishMessage{TopicName: topic, Payload: []byte(payload), PacketId: pid, QosLevel: qos}
-	err := tc.net.Send("", clientID(tc.id), pub)
+	err := tc.net.Send("", clientID(string(tc.id)), pub)
 	if err != nil {
 		tc.t.Fatalf("failed to publish message: %s\n", err.Error())
 	}
@@ -239,7 +239,7 @@ func (tc *TestClient) AssertMessageNotReceived(timeout time.Duration) {
 
 func (tc *TestClient) PubAck(pid MqttPacketId) {
 	ack := &MqttPubAckMessage{PacketId: pid}
-	err := tc.net.Send("", clientID(tc.id), ack)
+	err := tc.net.Send("", clientID(string(tc.id)), ack)
 	if err != nil {
 		tc.t.Fatalf("failed to send PUBCOMP: %s\n", err.Error())
 	}
@@ -261,7 +261,7 @@ func (tc *TestClient) PubRec(pid MqttPacketId) {
 	}
 
 	ack := &MqttPubRecMessage{PacketId: pid}
-	err := tc.net.Send("", clientID(tc.id), ack)
+	err := tc.net.Send("", clientID(string(tc.id)), ack)
 	if err != nil {
 		tc.t.Fatalf("failed to send PUBREC: %s\n", err.Error())
 	}
@@ -271,7 +271,7 @@ func (tc *TestClient) PubRec(pid MqttPacketId) {
 
 func (tc *TestClient) PubComp(pid MqttPacketId) {
 	ack := &MqttPubCompMessage{PacketId: pid}
-	err := tc.net.Send("", clientID(tc.id), ack)
+	err := tc.net.Send("", clientID(string(tc.id)), ack)
 	if err != nil {
 		tc.t.Fatalf("failed to send PUBCOMP: %s\n", err.Error())
 	}
@@ -279,7 +279,7 @@ func (tc *TestClient) PubComp(pid MqttPacketId) {
 
 func (tc *TestClient) createEndpoint() {
 	end := &TestEndpoint{}
-	err := tc.net.Send("", clientID(tc.id), &ClientEndpointCreated{endpoint: end})
+	err := tc.net.Send("", clientID(string(tc.id)), &ClientEndpointCreated{endpoint: end})
 	if err != nil {
 		tc.t.Fatalf("failed to set endpoint: %s \n", err.Error())
 	}
@@ -307,7 +307,7 @@ func (tc *TestClient) connect() {
 	}
 
 	conn := createConnect(tc.id)
-	err := tc.net.Send("", clientID(tc.id), conn)
+	err := tc.net.Send("", clientID(string(tc.id)), conn)
 	if err != nil {
 		tc.t.Fatalf("failed to send connect to client: %s\n", err.Error())
 	}
@@ -329,7 +329,7 @@ func (tc *TestClient) pubrel(pid MqttPacketId) {
 	}
 
 	pubrel := &MqttPubRelMessage{PacketId: pid}
-	err := tc.net.Send("", clientID(tc.id), pubrel)
+	err := tc.net.Send("", clientID(string(tc.id)), pubrel)
 	if err != nil {
 		tc.t.Fatalf("failed to publish message: %s\n", err.Error())
 	}
@@ -344,7 +344,7 @@ func createConnect(cid MqttClientId) *MqttConnectMessage {
 func createSubscribe(pid MqttPacketId, topic MqttTopicFilter, qos MqttQoSLevel) *MqttSubscribeMessage {
 	return &MqttSubscribeMessage{
 		PacketId: pid,
-		Subscriptions: []MqttSubscription{
+		Subscriptions: []*MqttSubscription{
 			{QosLevel: qos, TopicFilter: topic},
 		},
 	}
@@ -353,9 +353,9 @@ func createSubscribe(pid MqttPacketId, topic MqttTopicFilter, qos MqttQoSLevel) 
 var sessionStore = NewInMemSessionStore()
 
 func recvFactory(id hermes.ReceiverID) (hermes.Receiver, error) {
-	if isClientID(id) {
-		return newClient().preConnectRecv, nil
-	} else if isSessionID(id) {
+	if IsClientID(id) {
+		return NewClient().preConnectRecv, nil
+	} else if IsSessionID(id) {
 		s, err := newSession(sessionStore, SessionRepubTimeout)
 		if err != nil {
 			return nil, err

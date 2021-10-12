@@ -87,7 +87,7 @@ func newSessionState() *sessionState {
 	}
 }
 
-func (state *sessionState) subscribe(subs []MqttSubscription) ([]MqttSubAckStatus, error) {
+func (state *sessionState) subscribe(subs []*MqttSubscription) ([]MqttSubAckStatus, error) {
 	codes := make([]MqttSubAckStatus, len(subs))
 	for si, sub := range subs {
 		if strings.ContainsAny(string(sub.TopicFilter), "#+") { //[MQTT-3.8.3-2]
@@ -211,7 +211,7 @@ func (s *sessionState) nextPacketId() MqttPacketId {
 
 type SessionStore interface {
 	Create(sid string) (present bool, err error)
-	AddSub(sid string, subs []MqttSubscription) ([]MqttSubAckStatus, error)
+	AddSub(sid string, subs []*MqttSubscription) ([]MqttSubAckStatus, error)
 	RemoveSub(sid string, filters []MqttTopicFilter) error
 	AppendMsg(sid string, msg *MqttPublishMessage) error
 	RemoveMsg(sid string, pid MqttPacketId) (deleted bool, err error)
@@ -244,7 +244,7 @@ func (store *InMemSessionStore) Create(sid string) (bool, error) {
 	return false, nil
 }
 
-func (store *InMemSessionStore) AddSub(sid string, subs []MqttSubscription) ([]MqttSubAckStatus, error) {
+func (store *InMemSessionStore) AddSub(sid string, subs []*MqttSubscription) ([]MqttSubAckStatus, error) {
 	s, ok := store.sessions.Get(sid)
 	if !ok {
 		return nil, ErrSessionMissing
