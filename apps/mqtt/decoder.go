@@ -5,7 +5,7 @@ import (
 )
 
 const (
-	PacketTypeReserved0 = iota
+	PacketTypeReserved0 byte = iota
 	PacketTypeConnect
 	PacketTypeConnack
 	PacketTypePublish
@@ -66,12 +66,32 @@ func newPacket() *Packet {
 	return &Packet{rl: make([]byte, 0, 4)}
 }
 
-func (p *Packet) pType() int {
-	return int((p.ptf & 0xF0) >> 4)
+func (p *Packet) setPType(t byte) {
+	p.ptf = p.ptf & 0x0F
+	p.ptf = p.ptf | (t << 4)
+}
+
+func (p *Packet) pType() byte {
+	return byte((p.ptf & 0xF0) >> 4)
 }
 
 func (p *Packet) flags() int {
 	return int(p.ptf & 0x0F)
+}
+
+func (p *Packet) setRL(x uint) {
+	p.rl = p.rl[:0]
+
+	for x > 0 {
+		eb := byte(x % 128)
+		x = x / 128
+
+		if x > 0 {
+			eb = eb | 128
+		}
+
+		p.rl = append(p.rl, eb)
+	}
 }
 
 func (p *Packet) remainingLength() int {
@@ -86,12 +106,23 @@ func (p *Packet) remainingLength() int {
 	return value
 }
 
+func (p *Packet) pack() []byte {
+	sz := 1 + len(p.rl) + len(p.vhp)
+	b := make([]byte, 0, sz)
+
+	b = append(b, p.ptf)
+	b = append(b, p.rl...)
+	b = append(b, p.vhp...)
+
+	return b
+}
+
 type Decoder struct {
 	state  int
 	packet *Packet
 }
 
-func NewDecoder() *Decoder {
+func newDecoder() *Decoder {
 	return &Decoder{state: DecoderStatePTF}
 }
 
@@ -147,7 +178,7 @@ func (dec *Decoder) decode(buff []byte) ([]interface{}, error) {
 
 func (dec *Decoder) decodePTF(buff []byte) ([]byte, int, error) {
 	ptf := buff[0]
-	pt := int((ptf & 0xF0) >> 4)
+	pt := byte((ptf & 0xF0) >> 4)
 	if pt == PacketTypeReserved0 || pt == PacketTypeReserved15 {
 		return buff, DecoderStatePTF, ErrInvalidPacketType
 	}

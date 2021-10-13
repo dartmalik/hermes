@@ -15,16 +15,27 @@ var upgrader = websocket.Upgrader{Subprotocols: []string{"mqtt"}}
 
 type wsEndpoint struct {
 	id   uint64
+	enc  *Encoder
 	dec  *Decoder
 	conn *websocket.Conn
 	net  *hermes.Hermes
 }
 
 func newEndpoint(id uint64, conn *websocket.Conn, net *hermes.Hermes) *wsEndpoint {
-	return &wsEndpoint{id: id, conn: conn, net: net, dec: NewDecoder()}
+	return &wsEndpoint{id: id, conn: conn, net: net, enc: newEncoder(), dec: newDecoder()}
 }
 
 func (end *wsEndpoint) Write(msg interface{}) {
+	buff, err := end.enc.encode(msg)
+	if err != nil {
+		fmt.Printf("[ERROR] failed to encode msg: %s\n", err.Error())
+		return
+	}
+
+	err = end.conn.WriteMessage(websocket.BinaryMessage, buff)
+	if err != nil {
+		fmt.Printf("[ERROR] failed to write msg: %s\n", err.Error())
+	}
 }
 
 func (end *wsEndpoint) WriteAndClose(msg interface{}) {
