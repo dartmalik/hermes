@@ -210,6 +210,10 @@ func (ps *PubSub) sendRetainedMsgs(ctx hermes.Context, id hermes.ReceiverID, top
 	}
 
 	for _, m := range rms {
+		if m == nil {
+			continue
+		}
+
 		ev := &PubSubMessagePublished{msg: m}
 		err = ctx.Send(id, ev)
 		if err != nil {
