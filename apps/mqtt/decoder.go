@@ -371,9 +371,12 @@ func (dec *Decoder) decodePublish() (interface{}, error) {
 		return nil, ErrInvalidTopicName
 	}
 
-	pid, vhp, err := dec.decodePID(vhp, qos)
-	if err != nil {
-		return nil, ErrInvalidPacketID
+	var pid MqttPacketId
+	if qos > MqttQoSLevel0 {
+		pid, vhp, err = dec.decodePID(vhp, qos)
+		if err != nil {
+			return nil, ErrInvalidPacketID
+		}
 	}
 
 	vhsize := len(dec.packet.vhp) - len(vhp)
@@ -564,7 +567,7 @@ func (dec *Decoder) decodeTopicName(buff []byte) (MqttTopicName, []byte, error) 
 
 func (dec *Decoder) decodePID(buff []byte, qos MqttQoSLevel) (MqttPacketId, []byte, error) {
 	if qos < MqttQoSLevel1 {
-		return 0, buff, nil
+		return 0, buff, ErrInvalidPacketID
 	}
 
 	ui, buff, err := dec.decodeUint16(buff)

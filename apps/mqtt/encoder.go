@@ -84,20 +84,20 @@ func (enc *Encoder) encodePublish(msg *MqttPublishMessage) ([]byte, error) {
 
 	vhp := make([]byte, 0, rl)
 
-	vhp, err := enc.encodeBytes(vhp, []byte(msg.TopicName))
+	vhp, err := enc.encodeSizeBytes(vhp, []byte(msg.TopicName))
 	if err != nil {
 		return nil, err
 	}
 
 	vhp = enc.encodeUint16(vhp, uint16(msg.PacketId))
 
-	_, err = enc.encodeBytes(vhp, msg.Payload)
+	vhp, err = enc.encodeBytes(vhp, msg.Payload)
 	if err != nil {
 		return nil, err
 	}
 
 	p := newPacket()
-	p.setPType(PacketTypeConnack)
+	p.setPType(PacketTypePublish)
 	p.setFlags(ff)
 	p.setRL(uint(rl))
 	p.vhp = vhp
@@ -181,12 +181,18 @@ func (enc *Encoder) encodeUint16(buff []byte, val uint16) []byte {
 	return buff
 }
 
-func (enc *Encoder) encodeBytes(buff []byte, val []byte) ([]byte, error) {
+func (enc *Encoder) encodeSizeBytes(buff []byte, val []byte) ([]byte, error) {
 	if len(val) > math.MaxUint16 {
 		return buff, ErrInvalidStr
 	}
 
 	buff = enc.encodeUint16(buff, uint16(len(val)))
+	buff = append(buff, []byte(val)...)
+
+	return buff, nil
+}
+
+func (enc *Encoder) encodeBytes(buff []byte, val []byte) ([]byte, error) {
 	buff = append(buff, []byte(val)...)
 
 	return buff, nil
