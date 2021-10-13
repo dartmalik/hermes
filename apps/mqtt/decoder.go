@@ -67,12 +67,17 @@ func newPacket() *Packet {
 }
 
 func (p *Packet) setPType(t byte) {
-	p.ptf = p.ptf & 0x0F
-	p.ptf = p.ptf | (t << 4)
+	p.ptf &= 0x0F
+	p.ptf |= (t << 4)
 }
 
 func (p *Packet) pType() byte {
 	return byte((p.ptf & 0xF0) >> 4)
+}
+
+func (p *Packet) setFlags(flags byte) {
+	p.ptf &= 0xF0
+	p.ptf |= flags
 }
 
 func (p *Packet) flags() int {

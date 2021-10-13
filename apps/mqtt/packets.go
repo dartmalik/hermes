@@ -147,6 +147,8 @@ type MqttDisconnectMessage struct{}
 
 type MqttPingReqMessage struct{}
 
+type MqttPingRespMessage struct{}
+
 type MqttPacketId uint16
 
 type MqttPublishMessage struct {
