@@ -86,10 +86,6 @@ func (p *Packet) remainingLength() int {
 	return value
 }
 
-type ConnectMessage struct {
-	p *Packet
-}
-
 type Decoder struct {
 	state  int
 	packet *Packet
