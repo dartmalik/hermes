@@ -2,7 +2,6 @@ package mqtt
 
 import (
 	"errors"
-	"fmt"
 )
 
 const (
@@ -44,6 +43,7 @@ var (
 	ErrInvalidClientID     = errors.New("invalid_client_id")
 	ErrInvalidWillTopic    = errors.New("invalid_will_topic")
 	ErrInvalidWillMsg      = errors.New("invalid_will_msg")
+	ErrInvalidWillQos      = errors.New("invalid_will_qos")
 	ErrInvalidWillFlags    = errors.New("invalid_will_flags")
 	ErrInvalidUsername     = errors.New("invalid_username")
 	ErrInvalidPassword     = errors.New("invalid_password")
@@ -198,7 +198,6 @@ func (dec *Decoder) decodeVHP(buff []byte) ([]byte, int, error) {
 		sz = len(buff)
 	}
 
-	fmt.Printf("buff: %d, vhp: %d, rl: %d\n", len(buff), len(dec.packet.vhp), rl)
 	dec.packet.vhp = append(dec.packet.vhp, buff[:sz]...)
 
 	s := DecoderStateVHP
@@ -254,7 +253,7 @@ func (dec *Decoder) decodeConnect() (interface{}, error) {
 	}
 
 	cf, vhp, err := dec.decodeUint8(vhp)
-	if err != nil || cf&MqttConnectFlagsReserved == 1 {
+	if err != nil || cf&MqttConnectFlagsReserved != 0 {
 		return nil, ErrInvalidConnectFlags
 	}
 
@@ -270,7 +269,7 @@ func (dec *Decoder) decodeConnect() (interface{}, error) {
 
 	var willTopic string
 	var willMsg []byte
-	if cf&MqttConnectFlagsWill == 1 {
+	if cf&MqttConnectFlagsWill != 0 {
 		willTopic, vhp, err = dec.decodeStr(vhp)
 		if err != nil {
 			return nil, ErrInvalidWillTopic
@@ -280,14 +279,19 @@ func (dec *Decoder) decodeConnect() (interface{}, error) {
 		if err != nil {
 			return nil, ErrInvalidWillMsg
 		}
+
+		willQoS := MqttQoSLevel((cf & MqttConnectFlagsWillQoS) >> 3)
+		if willQoS > MqttQoSLevel2 {
+			return nil, ErrInvalidWillQos
+		}
 	} else {
-		if cf&MqttConnectFlagsWillQoS == 1 || cf&MqttConnectFlagsWillRetain == 1 {
+		if cf&MqttConnectFlagsWillQoS != 0 || cf&MqttConnectFlagsWillRetain != 0 {
 			return nil, ErrInvalidWillFlags
 		}
 	}
 
 	var username string
-	if cf&MqttConnectFlagsUsername == 1 {
+	if cf&MqttConnectFlagsUsername != 0 {
 		username, vhp, err = dec.decodeStr(vhp)
 		if err != nil {
 			return nil, ErrInvalidUsername
@@ -295,7 +299,7 @@ func (dec *Decoder) decodeConnect() (interface{}, error) {
 	}
 
 	var password string
-	if cf&MqttConnectFlagsPassword == 1 {
+	if cf&MqttConnectFlagsPassword != 0 {
 		password, _, err = dec.decodeStr(vhp)
 		if err != nil {
 			return nil, ErrInvalidPassword
@@ -320,8 +324,8 @@ func (dec *Decoder) decodeConnect() (interface{}, error) {
 func (dec *Decoder) decodePublish() (interface{}, error) {
 	ff := dec.packet.flags()
 	qos := MqttQoSLevel((ff & 0x06) >> 1)
-	dup := (ff&0x08)>>3 == 1
-	retain := (ff & 0x01) == 1
+	dup := (ff&0x08)>>3 != 0
+	retain := (ff & 0x01) != 0
 
 	if qos > MqttQoSLevel2 {
 		return nil, ErrInvalidFixedFlags
