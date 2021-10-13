@@ -54,43 +54,37 @@ func (enc *Encoder) encode(mi interface{}) ([]byte, error) {
 }
 
 func (enc *Encoder) encodeConnack(msg *MqttConnAckMessage) ([]byte, error) {
-	p := newPacket()
+	vhp := make([]byte, 2)
 
+	if msg.SessionPresent() {
+		vhp[0] |= 1
+	}
+	vhp[1] = msg.code
+
+	p := newPacket()
 	p.setPType(PacketTypeConnack)
 	p.setRL(2)
-
-	p.vhp = make([]byte, 2)
-	if msg.SessionPresent() {
-		p.vhp[0] |= 1
-	}
-	p.vhp[1] = msg.code
+	p.vhp = vhp
 
 	return p.pack(), nil
 }
 
 func (enc *Encoder) encodePublish(msg *MqttPublishMessage) ([]byte, error) {
-	p := newPacket()
-
-	p.setPType(PacketTypeConnack)
-
-	ff := byte(0)
+	ff := (byte(msg.QosLevel) << 1)
 	if msg.Retain {
 		ff |= 1
 	}
 	if msg.Duplicate {
 		ff |= 1 << 3
 	}
-	ff |= (byte(msg.QosLevel) << 1)
-	p.setFlags(ff)
 
 	rl := len(msg.TopicName) + 2
 	rl += 2 // PID
 	rl += len(msg.Payload)
-	p.setRL(uint(rl))
 
-	p.vhp = make([]byte, 0, rl)
+	vhp := make([]byte, 0, rl)
 
-	vhp, err := enc.encodeBytes(p.vhp, []byte(msg.TopicName))
+	vhp, err := enc.encodeBytes(vhp, []byte(msg.TopicName))
 	if err != nil {
 		return nil, err
 	}
@@ -101,6 +95,12 @@ func (enc *Encoder) encodePublish(msg *MqttPublishMessage) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	p := newPacket()
+	p.setPType(PacketTypeConnack)
+	p.setFlags(ff)
+	p.setRL(uint(rl))
+	p.vhp = vhp
 
 	return p.pack(), nil
 }
