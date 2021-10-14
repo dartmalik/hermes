@@ -44,7 +44,7 @@ func (end *wsEndpoint) WriteAndClose(msg interface{}) {
 }
 
 func (end *wsEndpoint) Close() {
-
+	end.conn.Close()
 }
 
 func (end *wsEndpoint) open() error {
@@ -55,6 +55,7 @@ func (end *wsEndpoint) process() {
 	for {
 		mt, buff, err := end.conn.ReadMessage()
 		if err != nil {
+			end.conn.Close()
 			break
 		}
 

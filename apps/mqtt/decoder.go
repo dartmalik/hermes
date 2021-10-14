@@ -166,6 +166,7 @@ func (dec *Decoder) decode(buff []byte) ([]interface{}, error) {
 			if err != nil {
 				return nil, err
 			}
+
 			mm[mi] = msg
 			mi++
 			dec.packet = nil
@@ -244,6 +245,9 @@ func (dec *Decoder) msg() (interface{}, error) {
 	switch dec.packet.pType() {
 	case PacketTypeConnect:
 		return dec.decodeConnect()
+
+	case PacketTypeConnack:
+		return dec.decodeConnack()
 
 	case PacketTypePublish:
 		return dec.decodePublish()
@@ -349,6 +353,15 @@ func (dec *Decoder) decodeConnect() (interface{}, error) {
 		willTopic:     MqttTopicName(willTopic),
 		willMsg:       willMsg,
 	}
+
+	return msg, nil
+}
+
+func (dec *Decoder) decodeConnack() (interface{}, error) {
+	msg := &MqttConnAckMessage{}
+
+	msg.SetSessionPresent(dec.packet.vhp[0]&0x1 != 0)
+	msg.code = dec.packet.vhp[1]
 
 	return msg, nil
 }

@@ -40,6 +40,9 @@ func (enc *Encoder) encode(mi interface{}) ([]byte, error) {
 	case *MqttPubCompMessage:
 		return enc.encodePuback(mi)
 
+	case *MqttSubscribeMessage:
+		return enc.encodeSubscribe(msg)
+
 	case *MqttSubAckMessage:
 		return enc.encodeSuback(msg)
 
@@ -130,6 +133,33 @@ func (enc *Encoder) encodePuback(mi interface{}) ([]byte, error) {
 	p.setRL(2)
 	p.vhp = make([]byte, 0, 2)
 	p.vhp = enc.encodeUint16(p.vhp, uint16(pid))
+
+	return p.pack(), nil
+}
+
+func (enc *Encoder) encodeSubscribe(msg *MqttSubscribeMessage) ([]byte, error) {
+	rl := 2
+	for _, sub := range msg.Subscriptions {
+		rl += len(sub.TopicFilter) + 2
+		rl += 1 // qos byte
+	}
+
+	var err error
+	vhp := make([]byte, 0, rl)
+
+	vhp = enc.encodeUint16(vhp, uint16(msg.PacketId))
+	for _, sub := range msg.Subscriptions {
+		vhp, err = enc.encodeSizeBytes(vhp, []byte(sub.TopicFilter))
+		if err != nil {
+			return nil, err
+		}
+		vhp = enc.encodeUint8(vhp, uint8(sub.QosLevel))
+	}
+
+	p := newPacket()
+	p.setPType(PacketTypeSubscribe)
+	p.setRL(uint(rl))
+	p.vhp = vhp
 
 	return p.pack(), nil
 }

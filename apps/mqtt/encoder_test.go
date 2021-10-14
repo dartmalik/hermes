@@ -49,6 +49,37 @@ func TestPublish(t *testing.T) {
 	}
 }
 
+func TestConnack(t *testing.T) {
+	enc := newEncoder()
+	dec := newDecoder()
+	ack := &MqttConnAckMessage{
+		code: 1,
+	}
+	ack.SetSessionPresent(true)
+
+	by, err := enc.encode(ack)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	msgs, err := dec.decode(by)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	if len(msgs) != 1 {
+		t.Fatal(err.Error())
+	}
+
+	da := msgs[0].(*MqttConnAckMessage)
+	if !da.SessionPresent() {
+		t.Error("invalid session present")
+	}
+	if da.code != 1 {
+		t.Error("invalid return code")
+	}
+}
+
 func TestPubAck(t *testing.T) {
 	enc := newEncoder()
 	dec := newDecoder()
@@ -73,5 +104,48 @@ func TestPubAck(t *testing.T) {
 	da := mi[0].(*MqttPubAckMessage)
 	if da.PacketId != ack.PacketId {
 		t.Error("packets ids mismatch")
+	}
+}
+
+func TestSubscribe(t *testing.T) {
+	enc := newEncoder()
+	dec := newDecoder()
+	sub := &MqttSubscribeMessage{
+		PacketId: 1,
+		Subscriptions: []*MqttSubscription{
+			{QosLevel: 2, TopicFilter: "t1"},
+			{QosLevel: 1, TopicFilter: "t2"},
+		},
+	}
+
+	by, err := enc.encode(sub)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	msgs, err := dec.decode(by)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	if len(msgs) != 1 {
+		t.Fatal("expected one message to be decoded")
+	}
+
+	ds := msgs[0].(*MqttSubscribeMessage)
+	if ds.PacketId != sub.PacketId {
+		t.Error("packet id mismatch")
+	}
+	if len(ds.Subscriptions) != len(sub.Subscriptions) {
+		t.Error("subscriptions count mismatch")
+	}
+
+	for si := 0; si < len(ds.Subscriptions); si++ {
+		if ds.Subscriptions[si].QosLevel != sub.Subscriptions[si].QosLevel {
+			t.Error("sub qos mismatch")
+		}
+		if ds.Subscriptions[si].TopicFilter != sub.Subscriptions[si].TopicFilter {
+			t.Error("sub topic filter mismatch")
+		}
 	}
 }
