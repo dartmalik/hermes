@@ -48,14 +48,13 @@ func (end *wsEndpoint) Close() {
 }
 
 func (end *wsEndpoint) open() error {
-	return end.net.Send("", end.cid(), &ClientEndpointCreated{endpoint: end})
+	return end.net.Send("", end.rid(), &ClientEndpointCreated{endpoint: end})
 }
 
 func (end *wsEndpoint) process() {
 	for {
 		mt, buff, err := end.conn.ReadMessage()
 		if err != nil {
-			end.conn.Close()
 			break
 		}
 
@@ -69,12 +68,14 @@ func (end *wsEndpoint) process() {
 		}
 
 		for _, m := range msgs {
-			end.net.Send("", end.cid(), m)
+			end.net.Send("", end.rid(), m)
 		}
 	}
+
+	end.Close()
 }
 
-func (end *wsEndpoint) cid() hermes.ReceiverID {
+func (end *wsEndpoint) rid() hermes.ReceiverID {
 	return clientID(fmt.Sprintf("%d", end.id))
 }
 
