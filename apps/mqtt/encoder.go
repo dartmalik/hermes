@@ -129,7 +129,7 @@ func (enc *Encoder) encodePuback(mi interface{}) ([]byte, error) {
 
 	p.setRL(2)
 	p.vhp = make([]byte, 0, 2)
-	enc.encodeUint16(p.vhp, uint16(pid))
+	p.vhp = enc.encodeUint16(p.vhp, uint16(pid))
 
 	return p.pack(), nil
 }

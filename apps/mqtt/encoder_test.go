@@ -48,3 +48,30 @@ func TestPublish(t *testing.T) {
 		t.Error("retain flag mismatch")
 	}
 }
+
+func TestPubAck(t *testing.T) {
+	enc := newEncoder()
+	dec := newDecoder()
+	ack := &MqttPubAckMessage{
+		PacketId: 2,
+	}
+
+	by, err := enc.encode(ack)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	mi, err := dec.decode(by)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	if len(mi) != 1 {
+		t.Fatal("expected one message to be decoded")
+	}
+
+	da := mi[0].(*MqttPubAckMessage)
+	if da.PacketId != ack.PacketId {
+		t.Error("packets ids mismatch")
+	}
+}
