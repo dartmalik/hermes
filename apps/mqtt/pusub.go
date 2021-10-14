@@ -56,7 +56,7 @@ type PubSub struct {
 	pollTimer hermes.Timer
 }
 
-func NewPubSubRecv(store MsgStore) (func(hermes.Context, hermes.Message), error) {
+func NewPubSubRecv(store MsgStore) (hermes.Receiver, error) {
 	ps, err := NewPubSub(store)
 	if err != nil {
 		return nil, err

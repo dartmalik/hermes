@@ -54,7 +54,7 @@ type Client struct {
 	keepaliveTimer hermes.Timer
 }
 
-func NewClientRecv() func(hermes.Context, hermes.Message) {
+func NewClientRecv() hermes.Receiver {
 	return NewClient().preConnectRecv
 }
 
