@@ -106,7 +106,7 @@ type Session struct {
 	repubTimeout time.Duration
 }
 
-func NewSessionRecv(store SessionStore, repubTimeout time.Duration) (func(hermes.Context, hermes.Message), error) {
+func NewSessionRecv(store SessionStore, repubTimeout time.Duration) (hermes.Receiver, error) {
 	s, err := newSession(store, repubTimeout)
 	if err != nil {
 		return nil, err
