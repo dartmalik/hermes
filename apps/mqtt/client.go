@@ -160,7 +160,7 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
 		}
 
 	default:
-		fmt.Printf("received invalid message: %T", t)
+		fmt.Printf("received invalid message: %T\n", t)
 		cl.disconnect(ctx, false)
 	}
 }
