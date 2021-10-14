@@ -10,6 +10,8 @@ import (
 	"github.com/dartali/hermes"
 )
 
+const waitTime = 1500 * time.Millisecond
+
 var curClientId uint64 = 0
 
 func NewClientId() MqttClientId {
@@ -386,7 +388,7 @@ func waitBool(t *testing.T, ch chan bool, err string) {
 	select {
 	case <-ch:
 
-	case <-time.After(1500 * time.Millisecond):
+	case <-time.After(waitTime):
 		t.Fatal(err)
 	}
 }
@@ -396,7 +398,7 @@ func waitPID(t *testing.T, ch chan MqttPacketId, err string) MqttPacketId {
 	case pid := <-ch:
 		return pid
 
-	case <-time.After(1500 * time.Millisecond):
+	case <-time.After(waitTime):
 		t.Fatal(err)
 		return 0
 	}

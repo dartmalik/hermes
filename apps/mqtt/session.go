@@ -127,56 +127,54 @@ func newSession(store SessionStore, repubTimeout time.Duration) (*Session, error
 	}, nil
 }
 
-func (s *Session) recv(ctx hermes.Context, msg hermes.Message) {
-	switch msg.Payload().(type) {
+func (s *Session) recv(ctx hermes.Context, hm hermes.Message) {
+	switch msg := hm.Payload().(type) {
 	case *hermes.Joined:
 
 	case *SessionRegisterRequest:
-		present, err := s.onRegister(ctx, msg.Payload().(*SessionRegisterRequest))
-		s.reply(ctx, msg, &SessionRegisterReply{present: present, Err: err})
+		present, err := s.onRegister(ctx, msg)
+		s.reply(ctx, hm, &SessionRegisterReply{present: present, Err: err})
 		s.scheduleProcess(ctx)
 
 	case *SessionUnregisterRequest:
-		err := s.onUnregister(ctx, msg.Payload().(*SessionUnregisterRequest))
-		s.reply(ctx, msg, &SessionUnregisterReply{Err: err})
+		err := s.onUnregister(ctx, msg)
+		s.reply(ctx, hm, &SessionUnregisterReply{Err: err})
 
 	case *MqttSubscribeMessage:
-		pid, codes, err := s.onSubscribe(ctx, msg.Payload().(*MqttSubscribeMessage))
+		pid, codes, err := s.onSubscribe(ctx, msg)
 		ack := &MqttSubAckMessage{PacketId: pid, ReturnCodes: codes}
-		s.reply(ctx, msg, &SessionSubscribeReply{Ack: ack, Err: err})
+		s.reply(ctx, hm, &SessionSubscribeReply{Ack: ack, Err: err})
 
 	case *MqttUnsubscribeMessage:
-		pid, err := s.onUnsubscribe(ctx, msg.Payload().(*MqttUnsubscribeMessage))
+		pid, err := s.onUnsubscribe(ctx, msg)
 		ack := &MqttUnSubAckMessage{PacketId: pid}
-		s.reply(ctx, msg, &SessionUnsubscribeReply{Ack: ack, Err: err})
+		s.reply(ctx, hm, &SessionUnsubscribeReply{Ack: ack, Err: err})
 
 	case *SessionPublishRequest:
-		err := s.onPublishMessage(ctx, msg.Payload().(*SessionPublishRequest))
-		s.reply(ctx, msg, &SessionPublishReply{Err: err})
+		err := s.onPublishMessage(ctx, msg)
+		s.reply(ctx, hm, &SessionPublishReply{Err: err})
 
 	case *SessionPubRelRequest:
-		err := s.onPubRel(ctx, msg.Payload().(*SessionPubRelRequest).PacketID)
-		s.reply(ctx, msg, &SessionPubRelReply{Err: err})
+		err := s.onPubRel(ctx, msg.PacketID)
+		s.reply(ctx, hm, &SessionPubRelReply{Err: err})
 
 	case *SessionPubAckRequest:
-		err := s.onPubAck(ctx, msg.Payload().(*SessionPubAckRequest))
-		s.reply(ctx, msg, &SessionPubAckReply{Err: err})
+		err := s.onPubAck(ctx, msg)
+		s.reply(ctx, hm, &SessionPubAckReply{Err: err})
 		s.scheduleProcess(ctx)
 
 	case *SessionPubRecRequest:
-		req := msg.Payload().(*SessionPubRecRequest)
-		err := s.onPubRec(ctx, req.PacketID)
-		s.reply(ctx, msg, &SessionPubRecReply{Err: err})
+		err := s.onPubRec(ctx, msg.PacketID)
+		s.reply(ctx, hm, &SessionPubRecReply{Err: err})
 		s.scheduleProcess(ctx)
 
-	case *SessionPubCompReply:
-		req := msg.Payload().(*SessionPubCompRequest)
-		err := s.onPubComp(ctx, req.PacketID)
-		s.reply(ctx, msg, &SessionPubCompReply{Err: err})
+	case *SessionPubCompRequest:
+		err := s.onPubComp(ctx, msg.PacketID)
+		s.reply(ctx, hm, &SessionPubCompReply{Err: err})
 		s.scheduleProcess(ctx)
 
 	case *PubSubMessagePublished:
-		err := s.onStoreMessage(ctx, msg.Payload().(*PubSubMessagePublished).msg)
+		err := s.onStoreMessage(ctx, msg.msg)
 		if err != nil {
 			fmt.Printf("failed to store message: %s\n", err.Error())
 		}
@@ -184,7 +182,7 @@ func (s *Session) recv(ctx hermes.Context, msg hermes.Message) {
 
 	case *SessionCleanRequest:
 		err := s.onClean(ctx)
-		s.reply(ctx, msg, &SessionCleanReply{Err: err})
+		s.reply(ctx, hm, &SessionCleanReply{Err: err})
 
 	case *sessionProcessPublishes:
 		s.onProcessPublishes(ctx)
@@ -312,7 +310,7 @@ func (s *Session) onPubRec(ctx hermes.Context, pid MqttPacketId) error {
 
 func (s *Session) onPubComp(ctx hermes.Context, pid MqttPacketId) error {
 	sid := string(ctx.ID())
-	sp, err := s.store.FetchLastInflightMessage(sid, SMStatePublished)
+	sp, err := s.store.FetchLastInflightMessage(sid, SMStateAcked)
 	if err != nil {
 		return err
 	}
