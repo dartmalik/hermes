@@ -281,7 +281,7 @@ func (tc *TestClient) PubComp(pid MqttPacketId) {
 
 func (tc *TestClient) createEndpoint() {
 	end := &TestEndpoint{}
-	err := tc.net.Send("", clientID(string(tc.id)), &ClientEndpointCreated{endpoint: end})
+	err := tc.net.Send("", clientID(string(tc.id)), &ClientEndpointOpened{endpoint: end})
 	if err != nil {
 		tc.t.Fatalf("failed to set endpoint: %s \n", err.Error())
 	}

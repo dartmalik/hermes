@@ -16,6 +16,18 @@ func main() {
 		return
 	}
 
+	ri, err := net.RequestWithTimeout("", mqtt.LWTID(), &mqtt.LWTJoinRequest{}, 1500*time.Millisecond)
+	if err != nil {
+		fmt.Printf("[FATAL] failed to register LWT module: %s\n", err.Error())
+		return
+	}
+
+	rep := ri.Payload().(*mqtt.LWTJoinReply)
+	if rep.Err != nil {
+		fmt.Printf("[FATAL] failed to register LWT module: %s\n", rep.Err.Error())
+		return
+	}
+
 	srv, err := mqtt.NewServer(net)
 	if err != nil {
 		fmt.Printf("[FATAL] unable to create hermes: %s\n", err.Error())
@@ -44,6 +56,10 @@ func factory(id hermes.ReceiverID) (hermes.Receiver, error) {
 		}
 
 		return r, nil
+	} else if mqtt.IsEventBusID(id) {
+		return mqtt.NewEventBusRecv(), nil
+	} else if mqtt.IsLWTID(id) {
+		return mqtt.NewLWTRecv(), nil
 	}
 
 	return nil, errors.New("unknown_receiver")

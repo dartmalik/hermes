@@ -49,6 +49,10 @@ var (
 	ErrNoHandler         = errors.New("no_handlers")
 )
 
+func IsEventBusID(rid hermes.ReceiverID) bool {
+	return rid == EventBusID()
+}
+
 func EventBusID() hermes.ReceiverID {
 	return hermes.ReceiverID("/events/bus")
 }
@@ -112,7 +116,7 @@ type eventbus struct {
 	h map[EventID]*orderedmap.OrderedMap
 }
 
-func NewEventBusRecv() func(hermes.Context, hermes.Message) {
+func NewEventBusRecv() hermes.Receiver {
 	b := &eventbus{h: make(map[EventID]*orderedmap.OrderedMap)}
 
 	return b.recv

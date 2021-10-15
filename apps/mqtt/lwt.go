@@ -7,11 +7,24 @@ import (
 	"github.com/dartali/hermes"
 )
 
+func IsLWTID(rid hermes.ReceiverID) bool {
+	return rid == LWTID()
+}
+
+func LWTID() hermes.ReceiverID {
+	return hermes.ReceiverID("/ext/lwt")
+}
+
+type LWTJoinRequest struct{}
+type LWTJoinReply struct {
+	Err error
+}
+
 type LWT struct {
 	msgs map[MqttClientId]*MqttPublishMessage
 }
 
-func NewLWTRecv() func(hermes.Context, hermes.Message) {
+func NewLWTRecv() hermes.Receiver {
 	return NewLWT().recv
 }
 
@@ -19,25 +32,24 @@ func NewLWT() *LWT {
 	return &LWT{msgs: make(map[MqttClientId]*MqttPublishMessage)}
 }
 
-func (lwt *LWT) recv(ctx hermes.Context, msg hermes.Message) {
-	switch msg.Payload().(type) {
+func (lwt *LWT) recv(ctx hermes.Context, hm hermes.Message) {
+	switch msg := hm.Payload().(type) {
 	case *hermes.Joined:
-		lwt.onJoin(ctx)
+
+	case *LWTJoinRequest:
+		err := lwt.onJoin(ctx)
+		ctx.Reply(hm, &LWTJoinReply{Err: err})
 
 	case *MqttConnectMessage:
-		lwt.onConnect(msg.Payload().(*MqttConnectMessage))
+		lwt.onConnect(msg)
 
 	case *ClientDisconnected:
-		lwt.onDisconnect(ctx, msg.Payload().(*ClientDisconnected))
+		lwt.onDisconnect(ctx, msg)
 	}
 }
 
-func (lwt *LWT) onJoin(ctx hermes.Context) {
-	err := Join(ctx, []EventID{"client.connected", "client.disconnected"}, ctx.ID())
-	if err != nil {
-		fmt.Printf("[FATAL] failed to join event groups: %s\n", err.Error())
-		panic(err)
-	}
+func (lwt *LWT) onJoin(ctx hermes.Context) error {
+	return Join(ctx, []EventID{"client.connected", "client.disconnected"}, ctx.ID())
 }
 
 func (lwt *LWT) onConnect(msg *MqttConnectMessage) {

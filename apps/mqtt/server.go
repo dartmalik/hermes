@@ -44,11 +44,13 @@ func (end *wsEndpoint) WriteAndClose(msg interface{}) {
 }
 
 func (end *wsEndpoint) Close() {
+	end.net.Send("", end.rid(), &ClientEndpointClosed{})
+
 	end.conn.Close()
 }
 
 func (end *wsEndpoint) open() error {
-	return end.net.Send("", end.rid(), &ClientEndpointCreated{endpoint: end})
+	return end.net.Send("", end.rid(), &ClientEndpointOpened{endpoint: end})
 }
 
 func (end *wsEndpoint) process() {
@@ -113,6 +115,4 @@ func (srv *Server) onConn(w http.ResponseWriter, r *http.Request) {
 	}
 
 	end.process()
-
-	end.Close()
 }

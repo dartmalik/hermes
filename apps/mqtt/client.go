@@ -36,9 +36,11 @@ const (
 	EvClientDisconnected   = "client.disconnected"
 )
 
-type ClientEndpointCreated struct {
+type ClientEndpointOpened struct {
 	endpoint Endpoint
 }
+
+type ClientEndpointClosed struct{}
 
 type ClientConnectRecvFailed struct{}
 
@@ -66,8 +68,11 @@ func (cl *Client) preConnectRecv(ctx hermes.Context, msg hermes.Message) {
 	switch msg.Payload().(type) {
 	case *hermes.Joined:
 
-	case *ClientEndpointCreated:
-		cl.onEndpoint(ctx, msg.Payload().(*ClientEndpointCreated))
+	case *ClientEndpointOpened:
+		cl.onEndpoint(ctx, msg.Payload().(*ClientEndpointOpened))
+
+	case *ClientEndpointClosed:
+		cl.onEndpointClosed(ctx, false)
 
 	case *MqttConnectMessage:
 		cl.onConnect(ctx, msg.Payload().(*MqttConnectMessage))
@@ -82,6 +87,9 @@ func (cl *Client) preConnectRecv(ctx hermes.Context, msg hermes.Message) {
 
 func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
 	switch t := msg.Payload().(type) {
+	case *ClientEndpointClosed:
+		cl.onEndpointClosed(ctx, true)
+
 	case *MqttPublishMessage:
 		pub := msg.Payload().(*MqttPublishMessage)
 		err := cl.onPublish(ctx, pub)
@@ -166,10 +174,10 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
 }
 
 func (cl *Client) dcRecv(ctx hermes.Context, msg hermes.Message) {
-	fmt.Printf("[WARN] received msg after disconnect: %T\n", msg)
+	fmt.Printf("[WARN] received msg after disconnect: %T\n", msg.Payload())
 }
 
-func (cl *Client) onEndpoint(ctx hermes.Context, msg *ClientEndpointCreated) {
+func (cl *Client) onEndpoint(ctx hermes.Context, msg *ClientEndpointOpened) {
 	cl.endpoint = msg.endpoint
 
 	t, err := ctx.Schedule(ClientConnectTimeout, &ClientConnectRecvFailed{})
@@ -337,6 +345,18 @@ func (cl *Client) onPubRel(ctx hermes.Context, msg *MqttPubRelMessage) error {
 	}
 
 	return nil
+}
+
+func (cl *Client) onEndpointClosed(ctx hermes.Context, unregister bool) {
+	fmt.Printf("[INFO] closing client\n")
+
+	ctx.SetReceiver(cl.dcRecv)
+
+	if unregister {
+		cl.unregister(ctx, cl.id)
+	}
+
+	Emit(ctx, EvClientDisconnected, &ClientDisconnected{ClientID: cl.id, Manual: false})
 }
 
 func (cl *Client) disconnect(ctx hermes.Context, manual bool) {
