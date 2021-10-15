@@ -54,6 +54,7 @@ type Client struct {
 	endpoint       Endpoint
 	conTimeout     hermes.Timer
 	keepaliveTimer hermes.Timer
+	manualDC       bool
 }
 
 func NewClientRecv() hermes.Receiver {
@@ -94,7 +95,7 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
 		pub := msg.Payload().(*MqttPublishMessage)
 		err := cl.onPublish(ctx, pub)
 		if err != nil {
-			cl.disconnect(ctx, false)
+			cl.endpoint.Close()
 		} else if pub.QosLevel == MqttQoSLevel1 {
 			cl.endpoint.Write(&MqttPubAckMessage{PacketId: pub.PacketId})
 		} else if pub.QosLevel == MqttQoSLevel2 {
@@ -105,14 +106,14 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
 		pa := msg.Payload().(*MqttPubAckMessage)
 		err := cl.onPubAck(ctx, pa.PacketId)
 		if err != nil {
-			cl.disconnect(ctx, false)
+			cl.endpoint.Close()
 		}
 
 	case *MqttPubRecMessage:
 		pr := msg.Payload().(*MqttPubRecMessage)
 		err := cl.onPubRec(ctx, pr.PacketId)
 		if err != nil {
-			cl.disconnect(ctx, false)
+			cl.endpoint.Close()
 		} else {
 			cl.endpoint.Write(&MqttPubRelMessage{PacketId: pr.PacketId})
 		}
@@ -121,14 +122,14 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
 		pc := msg.Payload().(*MqttPubCompMessage)
 		err := cl.onPubComp(ctx, pc.PacketId)
 		if err != nil {
-			cl.disconnect(ctx, false)
+			cl.endpoint.Close()
 		}
 
 	case *MqttPubRelMessage:
 		prel := msg.Payload().(*MqttPubRelMessage)
 		err := cl.onPubRel(ctx, prel)
 		if err != nil {
-			cl.disconnect(ctx, false)
+			cl.endpoint.Close()
 		} else {
 			cl.endpoint.Write(&MqttPubCompMessage{PacketId: prel.PacketId})
 		}
@@ -136,7 +137,7 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
 	case *MqttSubscribeMessage:
 		ack, err := cl.onSubscribe(ctx, msg.Payload().(*MqttSubscribeMessage))
 		if err != nil {
-			cl.disconnect(ctx, false)
+			cl.endpoint.Close()
 		} else {
 			cl.endpoint.Write(ack)
 		}
@@ -144,12 +145,14 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
 	case *MqttUnsubscribeMessage:
 		ack, err := cl.onUnsubscribe(ctx, msg.Payload().(*MqttUnsubscribeMessage))
 		if err != nil {
-			cl.disconnect(ctx, false)
+			cl.endpoint.Close()
 		} else {
 			cl.endpoint.Write(ack)
 		}
 
 	case *MqttDisconnectMessage:
+		cl.manualDC = true
+		cl.endpoint.Close()
 
 	case *SessionMessagePublished:
 		smp := msg.Payload().(*SessionMessagePublished)
@@ -163,13 +166,13 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
 			if smp.Msg.QoS() == MqttQoSLevel2 {
 				cl.endpoint.Write(&MqttPubRelMessage{PacketId: smp.Msg.ID()})
 			} else {
-				cl.disconnect(ctx, false)
+				cl.endpoint.Close()
 			}
 		}
 
 	default:
 		fmt.Printf("received invalid message: %T\n", t)
-		cl.disconnect(ctx, false)
+		cl.endpoint.Close()
 	}
 }
 
@@ -356,25 +359,7 @@ func (cl *Client) onEndpointClosed(ctx hermes.Context, unregister bool) {
 		cl.unregister(ctx, cl.id)
 	}
 
-	Emit(ctx, EvClientDisconnected, &ClientDisconnected{ClientID: cl.id, Manual: false})
-}
-
-func (cl *Client) disconnect(ctx hermes.Context, manual bool) {
-	if cl.id == "" {
-		fmt.Printf("[WARN] trying to disconnect a client that is not connected")
-	}
-
-	ctx.SetReceiver(cl.dcRecv)
-
-	if cl.id != "" {
-		cl.unregister(ctx, cl.id)
-	}
-
-	if cl.endpoint != nil {
-		cl.endpoint.Close()
-	}
-
-	Emit(ctx, EvClientDisconnected, &ClientDisconnected{ClientID: cl.id, Manual: manual})
+	Emit(ctx, EvClientDisconnected, &ClientDisconnected{ClientID: cl.id, Manual: cl.manualDC})
 }
 
 func (cl *Client) register(ctx hermes.Context, id MqttClientId) (bool, error) {
