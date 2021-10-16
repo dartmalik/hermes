@@ -102,6 +102,104 @@ type sessionProcessPublishes struct{}
 
 var SessionProcessPublishes = &sessionProcessPublishes{}
 
+func SessionPublish(ctx hermes.Context, sid hermes.ReceiverID, msg *MqttPublishMessage) error {
+	r, err := ctx.RequestWithTimeout(sid, &SessionPublishRequest{Msg: msg}, ClientRequestTimeout)
+	if err != nil {
+		return err
+	}
+
+	rep := r.Payload().(*SessionPublishReply)
+	if rep.Err != nil {
+		return rep.Err
+	}
+
+	return nil
+}
+
+func SessionPubAck(ctx hermes.Context, sid hermes.ReceiverID, pid MqttPacketId) error {
+	r, err := ctx.RequestWithTimeout(sid, &SessionPubAckRequest{PacketID: pid}, ClientRequestTimeout)
+	if err != nil {
+		return err
+	}
+
+	rep := r.Payload().(*SessionPubAckReply)
+	if rep.Err != nil {
+		return rep.Err
+	}
+
+	return nil
+}
+
+func SessionPubRec(ctx hermes.Context, sid hermes.ReceiverID, pid MqttPacketId) error {
+	r, err := ctx.RequestWithTimeout(sid, &SessionPubRecRequest{PacketID: pid}, ClientRequestTimeout)
+	if err != nil {
+		return err
+	}
+
+	rep := r.Payload().(*SessionPubRecReply)
+	if rep.Err != nil {
+		return rep.Err
+	}
+
+	return nil
+}
+
+func SessionPubRel(ctx hermes.Context, sid hermes.ReceiverID, pid MqttPacketId) error {
+	r, err := ctx.RequestWithTimeout(sid, &SessionPubRelRequest{PacketID: pid}, ClientRequestTimeout)
+	if err != nil {
+		return err
+	}
+
+	rep := r.Payload().(*SessionPubRelReply)
+	if rep.Err != nil {
+		return rep.Err
+	}
+
+	return nil
+}
+
+func SessionPubComp(ctx hermes.Context, sid hermes.ReceiverID, pid MqttPacketId) error {
+	r, err := ctx.RequestWithTimeout(sid, &SessionPubCompRequest{PacketID: pid}, ClientRequestTimeout)
+	if err != nil {
+		return err
+	}
+
+	rep := r.Payload().(*SessionPubCompReply)
+	if rep.Err != nil {
+		return rep.Err
+	}
+
+	return nil
+}
+
+func SessionSubscribe(ctx hermes.Context, sid hermes.ReceiverID, msg *MqttSubscribeMessage) (*MqttSubAckMessage, error) {
+	r, err := ctx.RequestWithTimeout(sid, msg, ClientRequestTimeout)
+	if err != nil {
+		return nil, err
+	}
+
+	rep := r.Payload().(*SessionSubscribeReply)
+	if rep.Err != nil {
+		return nil, rep.Err
+	}
+
+	return rep.Ack, nil
+}
+
+func SessionUnsubscribe(ctx hermes.Context, sid hermes.ReceiverID, msg *MqttUnsubscribeMessage) (*MqttUnSubAckMessage, error) {
+	r, err := ctx.RequestWithTimeout(sid, msg, ClientRequestTimeout)
+	if err != nil {
+		return nil, err
+	}
+
+	rep := r.Payload().(*SessionUnsubscribeReply)
+	if rep.Err != nil {
+		return nil, rep.Err
+	}
+
+	return rep.Ack, nil
+}
+
 type Session struct {
 	consumer     hermes.ReceiverID
 	store        SessionStore
