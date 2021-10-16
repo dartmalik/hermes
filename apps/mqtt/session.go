@@ -15,6 +15,10 @@ const (
 	SessionIDPrefix      = "/sessions/"
 )
 
+var (
+	ErrSessionInvalidPacketID = errors.New("invalid_packet_id")
+)
+
 func IsSessionID(id hermes.ReceiverID) bool {
 	return strings.HasPrefix(string(id), SessionIDPrefix)
 }
@@ -314,17 +318,17 @@ func (s *Session) onPubComp(ctx hermes.Context, pid MqttPacketId) error {
 	if err != nil {
 		return err
 	}
-
-	if sp.ID() != pid {
-		return errors.New("invalid_packet_id")
+	if sp == nil {
+		return ErrSessionInvalidPacketID
 	}
-	if sp.QoS() != MqttQoSLevel2 {
-		return errors.New("invalid_packet_id")
+
+	if sp.ID() != pid || sp.QoS() != MqttQoSLevel2 {
+		return ErrSessionInvalidPacketID
 	}
 
 	ok, err := s.store.RemoveMsg(sid, pid)
 	if !ok {
-		return errors.New("invalid_packet_id")
+		return ErrSessionInvalidPacketID
 	}
 	if err != nil {
 		return err
@@ -413,18 +417,18 @@ func (s *Session) ackMsg(ctx hermes.Context, pid MqttPacketId, qos MqttQoSLevel)
 	if err != nil {
 		return err
 	}
-
-	if sp.ID() != pid {
-		return errors.New("invalid_packet_id")
+	if sp == nil {
+		return ErrSessionInvalidPacketID
 	}
-	if sp.QoS() != qos {
-		return errors.New("invalid_packet_id")
+
+	if sp.ID() != pid || sp.QoS() != qos {
+		return ErrSessionInvalidPacketID
 	}
 
 	if qos == MqttQoSLevel1 {
 		ok, err := s.store.RemoveMsg(sid, pid)
 		if !ok {
-			return errors.New("invalid_packet_id")
+			return ErrSessionInvalidPacketID
 		}
 		if err != nil {
 			return err
@@ -437,7 +441,7 @@ func (s *Session) ackMsg(ctx hermes.Context, pid MqttPacketId, qos MqttQoSLevel)
 			return err
 		}
 		if !ok {
-			return errors.New("invalid_packet_id")
+			return ErrSessionInvalidPacketID
 		}
 	}
 

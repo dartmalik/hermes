@@ -32,28 +32,28 @@ const (
 )
 
 var (
-	ErrInvalidPacketType   = errors.New("invalid_packet_type")
-	ErrInvalidFixedFlags   = errors.New("invalid_fixed_flags")
-	ErrInvalidRemainingLen = errors.New("invalid_remaining_len")
-	ErrInvalidPacket       = errors.New("invalid_packet")
-	ErrInvalidProtocol     = errors.New("invalid_protocol")
-	ErrInvalidProtoLvl     = errors.New("invalid_protocol_level")
-	ErrInvalidConnectFlags = errors.New("invalid_connect_flags")
-	ErrInvalidKeepAlive    = errors.New("invalid_keep_alive")
-	ErrInvalidClientID     = errors.New("invalid_client_id")
-	ErrInvalidWillTopic    = errors.New("invalid_will_topic")
-	ErrInvalidWillMsg      = errors.New("invalid_will_msg")
-	ErrInvalidWillQos      = errors.New("invalid_will_qos")
-	ErrInvalidWillFlags    = errors.New("invalid_will_flags")
-	ErrInvalidUsername     = errors.New("invalid_username")
-	ErrInvalidPassword     = errors.New("invalid_password")
-	ErrInvalidUint8        = errors.New("invalid_uint8")
-	ErrInvalidUint16       = errors.New("invalid_uint16")
-	ErrInvalidStr          = errors.New("invalid_string")
-	ErrInvalidBytes        = errors.New("invalid_bytes")
-	ErrInvalidPacketID     = errors.New("invalid_packet_id")
-	ErrInvalidPayload      = errors.New("invalid_payload")
-	ErrInvalidSubscription = errors.New("invalid_subscription")
+	ErrCodecInvalidPacketType   = errors.New("invalid_packet_type")
+	ErrCodecInvalidFixedFlags   = errors.New("invalid_fixed_flags")
+	ErrCodecInvalidRemainingLen = errors.New("invalid_remaining_len")
+	ErrCodecInvalidPacket       = errors.New("invalid_packet")
+	ErrCodecInvalidProtocol     = errors.New("invalid_protocol")
+	ErrCodecInvalidProtoLvl     = errors.New("invalid_protocol_level")
+	ErrCodecInvalidConnectFlags = errors.New("invalid_connect_flags")
+	ErrCodecInvalidKeepAlive    = errors.New("invalid_keep_alive")
+	ErrCodecInvalidClientID     = errors.New("invalid_client_id")
+	ErrCodecInvalidWillTopic    = errors.New("invalid_will_topic")
+	ErrCodecInvalidWillMsg      = errors.New("invalid_will_msg")
+	ErrCodecInvalidWillQos      = errors.New("invalid_will_qos")
+	ErrCodecInvalidWillFlags    = errors.New("invalid_will_flags")
+	ErrCodecInvalidUsername     = errors.New("invalid_username")
+	ErrCodecInvalidPassword     = errors.New("invalid_password")
+	ErrCodecInvalidUint8        = errors.New("invalid_uint8")
+	ErrCodecInvalidUint16       = errors.New("invalid_uint16")
+	ErrCodecInvalidStr          = errors.New("invalid_string")
+	ErrCodecInvalidBytes        = errors.New("invalid_bytes")
+	ErrCodecInvalidPacketID     = errors.New("invalid_packet_id")
+	ErrCodecInvalidPayload      = errors.New("invalid_payload")
+	ErrCodecInvalidSubscription = errors.New("invalid_subscription")
 )
 
 type Packet struct {
@@ -186,7 +186,7 @@ func (dec *Decoder) decodePTF(buff []byte) ([]byte, int, error) {
 	ptf := buff[0]
 	pt := byte((ptf & 0xF0) >> 4)
 	if pt == PacketTypeReserved0 || pt == PacketTypeReserved15 {
-		return buff, DecoderStatePTF, ErrInvalidPacketType
+		return buff, DecoderStatePTF, ErrCodecInvalidPacketType
 	}
 
 	dec.packet = newPacket()
@@ -199,7 +199,7 @@ func (dec *Decoder) decodeRL(buff []byte) ([]byte, int, error) {
 	s := DecoderStateRLen
 	for len(buff) > 0 {
 		if len(dec.packet.rl) == 4 {
-			return buff, DecoderStatePTF, ErrInvalidRemainingLen
+			return buff, DecoderStatePTF, ErrCodecInvalidRemainingLen
 		}
 
 		eb := buff[0]
@@ -215,7 +215,7 @@ func (dec *Decoder) decodeRL(buff []byte) ([]byte, int, error) {
 	if s == DecoderStateVHP {
 		rl := dec.packet.remainingLength()
 		if rl > 128*128*128 {
-			return buff, DecoderStatePTF, ErrInvalidRemainingLen
+			return buff, DecoderStatePTF, ErrCodecInvalidRemainingLen
 		}
 
 		dec.packet.vhp = make([]byte, 0, rl)
@@ -274,33 +274,33 @@ func (dec *Decoder) msg() (interface{}, error) {
 		return dec.decodeDisconnect()
 	}
 
-	return nil, ErrInvalidPacketType
+	return nil, ErrCodecInvalidPacketType
 }
 
 func (dec *Decoder) decodeConnect() (interface{}, error) {
 	proto, vhp, err := dec.decodeStr(dec.packet.vhp)
 	if err != nil || proto != Protocol {
-		return nil, ErrInvalidProtocol
+		return nil, ErrCodecInvalidProtocol
 	}
 
 	plvl, vhp, err := dec.decodeUint8(vhp)
 	if err != nil || plvl != ProtocolLvl {
-		return nil, ErrInvalidProtoLvl
+		return nil, ErrCodecInvalidProtoLvl
 	}
 
 	cf, vhp, err := dec.decodeUint8(vhp)
 	if err != nil || cf&MqttConnectFlagsReserved != 0 {
-		return nil, ErrInvalidConnectFlags
+		return nil, ErrCodecInvalidConnectFlags
 	}
 
 	ka, vhp, err := dec.decodeUint16(vhp)
 	if err != nil {
-		return nil, ErrInvalidKeepAlive
+		return nil, ErrCodecInvalidKeepAlive
 	}
 
 	cid, vhp, err := dec.decodeStr(vhp)
 	if err != nil || cid == "" {
-		return nil, ErrInvalidClientID
+		return nil, ErrCodecInvalidClientID
 	}
 
 	var willTopic string
@@ -308,21 +308,21 @@ func (dec *Decoder) decodeConnect() (interface{}, error) {
 	if cf&MqttConnectFlagsWill != 0 {
 		willTopic, vhp, err = dec.decodeStr(vhp)
 		if err != nil {
-			return nil, ErrInvalidWillTopic
+			return nil, ErrCodecInvalidWillTopic
 		}
 
 		willMsg, vhp, err = dec.decodeBytes(vhp)
 		if err != nil {
-			return nil, ErrInvalidWillMsg
+			return nil, ErrCodecInvalidWillMsg
 		}
 
 		willQoS := MqttQoSLevel((cf & MqttConnectFlagsWillQoS) >> 3)
 		if willQoS > MqttQoSLevel2 {
-			return nil, ErrInvalidWillQos
+			return nil, ErrCodecInvalidWillQos
 		}
 	} else {
 		if cf&MqttConnectFlagsWillQoS != 0 || cf&MqttConnectFlagsWillRetain != 0 {
-			return nil, ErrInvalidWillFlags
+			return nil, ErrCodecInvalidWillFlags
 		}
 	}
 
@@ -330,7 +330,7 @@ func (dec *Decoder) decodeConnect() (interface{}, error) {
 	if cf&MqttConnectFlagsUsername != 0 {
 		username, vhp, err = dec.decodeStr(vhp)
 		if err != nil {
-			return nil, ErrInvalidUsername
+			return nil, ErrCodecInvalidUsername
 		}
 	}
 
@@ -338,7 +338,7 @@ func (dec *Decoder) decodeConnect() (interface{}, error) {
 	if cf&MqttConnectFlagsPassword != 0 {
 		password, _, err = dec.decodeStr(vhp)
 		if err != nil {
-			return nil, ErrInvalidPassword
+			return nil, ErrCodecInvalidPassword
 		}
 	}
 
@@ -373,10 +373,10 @@ func (dec *Decoder) decodePublish() (interface{}, error) {
 	retain := (ff & 0x01) != 0
 
 	if qos > MqttQoSLevel2 {
-		return nil, ErrInvalidFixedFlags
+		return nil, ErrCodecInvalidFixedFlags
 	}
 	if qos == MqttQoSLevel0 && dup {
-		return nil, ErrInvalidFixedFlags
+		return nil, ErrCodecInvalidFixedFlags
 	}
 
 	topic, vhp, err := dec.decodeTopicName(dec.packet.vhp)
@@ -388,7 +388,7 @@ func (dec *Decoder) decodePublish() (interface{}, error) {
 	if qos > MqttQoSLevel0 {
 		pid, vhp, err = dec.decodePID(vhp, qos)
 		if err != nil {
-			return nil, ErrInvalidPacketID
+			return nil, ErrCodecInvalidPacketID
 		}
 	}
 
@@ -396,7 +396,7 @@ func (dec *Decoder) decodePublish() (interface{}, error) {
 	psize := dec.packet.remainingLength() - vhsize
 	payload, _, err := dec.decodeNumBytes(vhp, psize)
 	if err != nil {
-		return nil, ErrInvalidPayload
+		return nil, ErrCodecInvalidPayload
 	}
 
 	msg := &MqttPublishMessage{
@@ -416,7 +416,7 @@ func (dec *Decoder) decodePublish() (interface{}, error) {
 func (dec *Decoder) decodePuback() (interface{}, error) {
 	pid, _, err := dec.decodePID(dec.packet.vhp, MqttQoSLevel2)
 	if err != nil {
-		return nil, ErrInvalidPacketID
+		return nil, ErrCodecInvalidPacketID
 	}
 
 	switch dec.packet.pType() {
@@ -433,13 +433,13 @@ func (dec *Decoder) decodePuback() (interface{}, error) {
 		return &MqttPubCompMessage{PacketId: pid}, nil
 	}
 
-	return nil, ErrInvalidPacketType
+	return nil, ErrCodecInvalidPacketType
 }
 
 func (dec *Decoder) decodeSubscribe() (interface{}, error) {
 	pid, vhp, err := dec.decodePID(dec.packet.vhp, MqttQoSLevel2)
 	if err != nil {
-		return nil, ErrInvalidPacketID
+		return nil, ErrCodecInvalidPacketID
 	}
 
 	sm := make(map[int]*MqttSubscription)
@@ -448,13 +448,13 @@ func (dec *Decoder) decodeSubscribe() (interface{}, error) {
 		var f string
 		f, vhp, err = dec.decodeStr(vhp)
 		if err != nil || f == "" {
-			return nil, ErrInvalidSubscription
+			return nil, ErrCodecInvalidSubscription
 		}
 
 		var qos uint8
 		qos, vhp, err = dec.decodeUint8(vhp)
 		if err != nil || qos > uint8(MqttQoSLevel2) {
-			return nil, ErrInvalidSubscription
+			return nil, ErrCodecInvalidSubscription
 		}
 
 		sub := &MqttSubscription{QosLevel: MqttQoSLevel(qos), TopicFilter: MqttTopicFilter(f)}
@@ -463,7 +463,7 @@ func (dec *Decoder) decodeSubscribe() (interface{}, error) {
 	}
 
 	if len(sm) == 0 {
-		return nil, ErrInvalidSubscription
+		return nil, ErrCodecInvalidSubscription
 	}
 
 	subs := make([]*MqttSubscription, 0, len(sm))
@@ -479,7 +479,7 @@ func (dec *Decoder) decodeSubscribe() (interface{}, error) {
 func (dec *Decoder) decodeUnsubscribe() (interface{}, error) {
 	pid, vhp, err := dec.decodePID(dec.packet.vhp, MqttQoSLevel2)
 	if err != nil {
-		return nil, ErrInvalidPacketID
+		return nil, ErrCodecInvalidPacketID
 	}
 
 	fm := make(map[int]string)
@@ -488,7 +488,7 @@ func (dec *Decoder) decodeUnsubscribe() (interface{}, error) {
 		var f string
 		f, vhp, err = dec.decodeStr(vhp)
 		if err != nil || f == "" {
-			return nil, ErrInvalidSubscription
+			return nil, ErrCodecInvalidSubscription
 		}
 
 		fm[si] = f
@@ -496,7 +496,7 @@ func (dec *Decoder) decodeUnsubscribe() (interface{}, error) {
 	}
 
 	if len(fm) == 0 {
-		return nil, ErrInvalidPacket
+		return nil, ErrCodecInvalidPacket
 	}
 
 	filters := make([]MqttTopicFilter, 0, len(fm))
@@ -519,7 +519,7 @@ func (dec *Decoder) decodeDisconnect() (interface{}, error) {
 
 func (dec *Decoder) decodeUint8(buff []byte) (uint8, []byte, error) {
 	if len(buff) < 1 {
-		return 0, buff, ErrInvalidUint8
+		return 0, buff, ErrCodecInvalidUint8
 	}
 
 	return uint8(buff[0]), buff[1:], nil
@@ -527,7 +527,7 @@ func (dec *Decoder) decodeUint8(buff []byte) (uint8, []byte, error) {
 
 func (dec *Decoder) decodeUint16(buff []byte) (uint16, []byte, error) {
 	if len(buff) < 2 {
-		return 0, buff, ErrInvalidUint16
+		return 0, buff, ErrCodecInvalidUint16
 	}
 
 	return uint16(buff[0])<<8 | uint16(buff[1]), buff[2:], nil
@@ -540,7 +540,7 @@ func (dec *Decoder) decodeStr(buff []byte) (string, []byte, error) {
 	}
 
 	if len(buff) < int(sz) {
-		return "", buff, ErrInvalidStr
+		return "", buff, ErrCodecInvalidStr
 	}
 
 	return string(buff[:sz]), buff[sz:], nil
@@ -557,7 +557,7 @@ func (dec *Decoder) decodeBytes(buff []byte) ([]byte, []byte, error) {
 
 func (dec *Decoder) decodeNumBytes(buff []byte, num int) ([]byte, []byte, error) {
 	if len(buff) < num {
-		return nil, buff, ErrInvalidBytes
+		return nil, buff, ErrCodecInvalidBytes
 	}
 
 	if num == 0 {
@@ -580,7 +580,7 @@ func (dec *Decoder) decodeTopicName(buff []byte) (MqttTopicName, []byte, error) 
 
 func (dec *Decoder) decodePID(buff []byte, qos MqttQoSLevel) (MqttPacketId, []byte, error) {
 	if qos < MqttQoSLevel1 {
-		return 0, buff, ErrInvalidPacketID
+		return 0, buff, ErrCodecInvalidPacketID
 	}
 
 	ui, buff, err := dec.decodeUint16(buff)

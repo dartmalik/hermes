@@ -86,56 +86,51 @@ func (cl *Client) preConnectRecv(ctx hermes.Context, msg hermes.Message) {
 	}
 }
 
-func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
-	switch t := msg.Payload().(type) {
+func (cl *Client) postConnectRecv(ctx hermes.Context, hm hermes.Message) {
+	switch msg := hm.Payload().(type) {
 	case *ClientEndpointClosed:
 		cl.onEndpointClosed(ctx, true)
 
 	case *MqttPublishMessage:
-		pub := msg.Payload().(*MqttPublishMessage)
-		err := cl.onPublish(ctx, pub)
+		err := cl.onPublish(ctx, msg)
 		if err != nil {
 			cl.endpoint.Close()
-		} else if pub.QosLevel == MqttQoSLevel1 {
-			cl.endpoint.Write(&MqttPubAckMessage{PacketId: pub.PacketId})
-		} else if pub.QosLevel == MqttQoSLevel2 {
-			cl.endpoint.Write(&MqttPubRecMessage{PacketId: pub.PacketId})
+		} else if msg.QosLevel == MqttQoSLevel1 {
+			cl.endpoint.Write(&MqttPubAckMessage{PacketId: msg.PacketId})
+		} else if msg.QosLevel == MqttQoSLevel2 {
+			cl.endpoint.Write(&MqttPubRecMessage{PacketId: msg.PacketId})
 		}
 
 	case *MqttPubAckMessage:
-		pa := msg.Payload().(*MqttPubAckMessage)
-		err := cl.onPubAck(ctx, pa.PacketId)
+		err := cl.onPubAck(ctx, msg.PacketId)
 		if err != nil {
 			cl.endpoint.Close()
 		}
 
 	case *MqttPubRecMessage:
-		pr := msg.Payload().(*MqttPubRecMessage)
-		err := cl.onPubRec(ctx, pr.PacketId)
+		err := cl.onPubRec(ctx, msg.PacketId)
 		if err != nil {
 			cl.endpoint.Close()
 		} else {
-			cl.endpoint.Write(&MqttPubRelMessage{PacketId: pr.PacketId})
+			cl.endpoint.Write(&MqttPubRelMessage{PacketId: msg.PacketId})
 		}
 
 	case *MqttPubCompMessage:
-		pc := msg.Payload().(*MqttPubCompMessage)
-		err := cl.onPubComp(ctx, pc.PacketId)
+		err := cl.onPubComp(ctx, msg.PacketId)
 		if err != nil {
 			cl.endpoint.Close()
 		}
 
 	case *MqttPubRelMessage:
-		prel := msg.Payload().(*MqttPubRelMessage)
-		err := cl.onPubRel(ctx, prel)
+		err := cl.onPubRel(ctx, msg)
 		if err != nil {
 			cl.endpoint.Close()
 		} else {
-			cl.endpoint.Write(&MqttPubCompMessage{PacketId: prel.PacketId})
+			cl.endpoint.Write(&MqttPubCompMessage{PacketId: msg.PacketId})
 		}
 
 	case *MqttSubscribeMessage:
-		ack, err := cl.onSubscribe(ctx, msg.Payload().(*MqttSubscribeMessage))
+		ack, err := cl.onSubscribe(ctx, msg)
 		if err != nil {
 			cl.endpoint.Close()
 		} else {
@@ -143,7 +138,7 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
 		}
 
 	case *MqttUnsubscribeMessage:
-		ack, err := cl.onUnsubscribe(ctx, msg.Payload().(*MqttUnsubscribeMessage))
+		ack, err := cl.onUnsubscribe(ctx, msg)
 		if err != nil {
 			cl.endpoint.Close()
 		} else {
@@ -151,33 +146,36 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, msg hermes.Message) {
 		}
 
 	case *MqttDisconnectMessage:
-		cl.manualDC = true
-		cl.endpoint.Close()
+		cl.onDisconnect()
 
 	case *SessionMessagePublished:
-		smp := msg.Payload().(*SessionMessagePublished)
-		if smp.Msg.State() == SMStatePublished {
-			pub := cl.toPub(smp.Msg)
+		if msg.Msg.State() == SMStatePublished {
+			pub := cl.toPub(msg.Msg)
 			cl.endpoint.Write(pub)
-			if smp.Msg.QoS() == MqttQoSLevel0 {
-				ctx.Send(sessionID(cl.id), &MqttPubAckMessage{PacketId: smp.Msg.ID()})
+			if msg.Msg.QoS() == MqttQoSLevel0 {
+				ctx.Send(sessionID(cl.id), &MqttPubAckMessage{PacketId: msg.Msg.ID()})
 			}
-		} else if smp.Msg.State() == SMStateAcked {
-			if smp.Msg.QoS() == MqttQoSLevel2 {
-				cl.endpoint.Write(&MqttPubRelMessage{PacketId: smp.Msg.ID()})
+		} else if msg.Msg.State() == SMStateAcked {
+			if msg.Msg.QoS() == MqttQoSLevel2 {
+				cl.endpoint.Write(&MqttPubRelMessage{PacketId: msg.Msg.ID()})
 			} else {
 				cl.endpoint.Close()
 			}
 		}
 
 	default:
-		fmt.Printf("received invalid message: %T\n", t)
+		fmt.Printf("received invalid message: %T\n", msg)
 		cl.endpoint.Close()
 	}
 }
 
 func (cl *Client) dcRecv(ctx hermes.Context, msg hermes.Message) {
 	fmt.Printf("[WARN] received msg after disconnect: %T\n", msg.Payload())
+}
+
+func (cl *Client) onDisconnect() {
+	cl.manualDC = true
+	cl.endpoint.Close()
 }
 
 func (cl *Client) onEndpoint(ctx hermes.Context, msg *ClientEndpointOpened) {

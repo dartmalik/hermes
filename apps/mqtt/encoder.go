@@ -213,7 +213,7 @@ func (enc *Encoder) encodeUint16(buff []byte, val uint16) []byte {
 
 func (enc *Encoder) encodeSizeBytes(buff []byte, val []byte) ([]byte, error) {
 	if len(val) > math.MaxUint16 {
-		return buff, ErrInvalidStr
+		return buff, ErrCodecInvalidStr
 	}
 
 	buff = enc.encodeUint16(buff, uint16(len(val)))
