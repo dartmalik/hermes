@@ -14,11 +14,12 @@ import (
 var upgrader = websocket.Upgrader{Subprotocols: []string{"mqtt"}}
 
 type wsEndpoint struct {
-	id   uint64
-	enc  *Encoder
-	dec  *Decoder
-	conn *websocket.Conn
-	net  *hermes.Hermes
+	id     uint64
+	enc    *Encoder
+	dec    *Decoder
+	conn   *websocket.Conn
+	net    *hermes.Hermes
+	closed bool
 }
 
 func newEndpoint(id uint64, conn *websocket.Conn, net *hermes.Hermes) *wsEndpoint {
@@ -44,6 +45,12 @@ func (end *wsEndpoint) WriteAndClose(msg interface{}) {
 }
 
 func (end *wsEndpoint) Close() {
+	if end.closed {
+		return
+	}
+
+	end.closed = true
+
 	end.net.Send("", end.rid(), &ClientEndpointClosed{})
 
 	end.conn.Close()

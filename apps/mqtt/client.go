@@ -119,6 +119,9 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, hm hermes.Message) {
 	case *SessionMessagePublished:
 		cl.onSessionMessagePublished(ctx, msg)
 
+	case *SessionUnregistered:
+		cl.endpoint.Close()
+
 	default:
 		fmt.Printf("received invalid message: %T\n", msg)
 		cl.endpoint.Close()
@@ -141,8 +144,6 @@ func (cl *Client) onEndpointOpened(ctx hermes.Context, msg *ClientEndpointOpened
 }
 
 func (cl *Client) onEndpointClosed(ctx hermes.Context, unregister bool) {
-	fmt.Printf("[INFO] closing client\n")
-
 	ctx.SetReceiver(cl.dcRecv)
 
 	if unregister {
