@@ -65,23 +65,24 @@ func NewClient() *Client {
 	return &Client{}
 }
 
-func (cl *Client) preConnectRecv(ctx hermes.Context, msg hermes.Message) {
-	switch msg.Payload().(type) {
+func (cl *Client) preConnectRecv(ctx hermes.Context, hm hermes.Message) {
+	switch msg := hm.Payload().(type) {
 	case *hermes.Joined:
 
 	case *ClientEndpointOpened:
-		cl.onEndpointOpened(ctx, msg.Payload().(*ClientEndpointOpened))
+		cl.onEndpointOpened(ctx, msg)
 
 	case *ClientEndpointClosed:
 		cl.onEndpointClosed(ctx, false)
 
 	case *MqttConnectMessage:
-		cl.onConnect(ctx, msg.Payload().(*MqttConnectMessage))
+		cl.onConnect(ctx, msg)
 
 	case *ClientConnectRecvFailed:
 		cl.endpoint.Close()
 
 	default:
+		fmt.Printf("received invalid message: %T\n", msg)
 		cl.endpoint.Close()
 	}
 }
