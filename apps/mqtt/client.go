@@ -13,7 +13,7 @@ const (
 	ClientRequestTimeout = 1500 * time.Millisecond
 )
 
-type Endpoint interface {
+type MqttEndpoint interface {
 	Write(msg interface{})
 	WriteAndClose(msg interface{})
 	Close()
@@ -37,7 +37,7 @@ const (
 )
 
 type ClientEndpointOpened struct {
-	endpoint Endpoint
+	endpoint MqttEndpoint
 }
 
 type ClientEndpointClosed struct{}
@@ -51,7 +51,7 @@ type ClientDisconnected struct {
 
 type Client struct {
 	id             MqttClientId
-	endpoint       Endpoint
+	endpoint       MqttEndpoint
 	conTimeout     hermes.Timer
 	keepaliveTimer hermes.Timer
 	manualDC       bool
@@ -126,11 +126,6 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, hm hermes.Message) {
 
 func (cl *Client) dcRecv(ctx hermes.Context, msg hermes.Message) {
 	fmt.Printf("[WARN] received msg after disconnect: %T\n", msg.Payload())
-}
-
-func (cl *Client) onDisconnect() {
-	cl.manualDC = true
-	cl.endpoint.Close()
 }
 
 func (cl *Client) onEndpointOpened(ctx hermes.Context, msg *ClientEndpointOpened) {
@@ -292,6 +287,11 @@ func (cl *Client) onSessionMessagePublished(ctx hermes.Context, msg *SessionMess
 			cl.endpoint.Close()
 		}
 	}
+}
+
+func (cl *Client) onDisconnect() {
+	cl.manualDC = true
+	cl.endpoint.Close()
 }
 
 func (cl *Client) register(ctx hermes.Context, id MqttClientId) (bool, error) {
