@@ -70,7 +70,7 @@ func (cl *Client) preConnectRecv(ctx hermes.Context, msg hermes.Message) {
 	case *hermes.Joined:
 
 	case *ClientEndpointOpened:
-		cl.onEndpoint(ctx, msg.Payload().(*ClientEndpointOpened))
+		cl.onEndpointOpened(ctx, msg.Payload().(*ClientEndpointOpened))
 
 	case *ClientEndpointClosed:
 		cl.onEndpointClosed(ctx, false)
@@ -133,7 +133,7 @@ func (cl *Client) onDisconnect() {
 	cl.endpoint.Close()
 }
 
-func (cl *Client) onEndpoint(ctx hermes.Context, msg *ClientEndpointOpened) {
+func (cl *Client) onEndpointOpened(ctx hermes.Context, msg *ClientEndpointOpened) {
 	cl.endpoint = msg.endpoint
 
 	t, err := ctx.Schedule(ClientConnectTimeout, &ClientConnectRecvFailed{})
@@ -142,6 +142,18 @@ func (cl *Client) onEndpoint(ctx hermes.Context, msg *ClientEndpointOpened) {
 		cl.endpoint.Close()
 	}
 	cl.conTimeout = t
+}
+
+func (cl *Client) onEndpointClosed(ctx hermes.Context, unregister bool) {
+	fmt.Printf("[INFO] closing client\n")
+
+	ctx.SetReceiver(cl.dcRecv)
+
+	if unregister {
+		cl.unregister(ctx, cl.id)
+	}
+
+	Emit(ctx, EvClientDisconnected, &ClientDisconnected{ClientID: cl.id, Manual: cl.manualDC})
 }
 
 func (cl *Client) onConnect(ctx hermes.Context, msg *MqttConnectMessage) {
@@ -264,18 +276,6 @@ func (cl *Client) onPubRel(ctx hermes.Context, msg *MqttPubRelMessage) {
 	} else {
 		cl.endpoint.Write(&MqttPubCompMessage{PacketId: msg.PacketId})
 	}
-}
-
-func (cl *Client) onEndpointClosed(ctx hermes.Context, unregister bool) {
-	fmt.Printf("[INFO] closing client\n")
-
-	ctx.SetReceiver(cl.dcRecv)
-
-	if unregister {
-		cl.unregister(ctx, cl.id)
-	}
-
-	Emit(ctx, EvClientDisconnected, &ClientDisconnected{ClientID: cl.id, Manual: cl.manualDC})
 }
 
 func (cl *Client) onSessionMessagePublished(ctx hermes.Context, msg *SessionMessagePublished) {
