@@ -99,14 +99,14 @@ func (lwt *LWT) onDisconnect(ctx hermes.Context, ev *ClientDisconnected) {
 
 	defer delete(lwt.msgs, cid)
 
-	r, err := ctx.RequestWithTimeout(PubSubID(), &PubSubPublishRequest{msg: msg}, 1500*time.Millisecond)
+	r, err := ctx.RequestWithTimeout(PubSubID(), &PubSubPublishRequest{Msg: msg}, 1500*time.Millisecond)
 	if err != nil {
 		fmt.Printf("[ERROR] failed to publish lwt msg: %s\n", err.Error())
 		return
 	}
 
 	rep := r.Payload().(*PubSubPublishReply)
-	if rep.err != nil {
-		fmt.Printf("[ERROR] failed to publish lwt msg: %s\n", rep.err.Error())
+	if rep.Err != nil {
+		fmt.Printf("[ERROR] failed to publish lwt msg: %s\n", rep.Err.Error())
 	}
 }

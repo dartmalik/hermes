@@ -203,7 +203,7 @@ func testPublishMessage(t *testing.T, ctx *TestContext, s *Session, topic MqttTo
 	}
 
 	pub := &MqttPublishMessage{TopicName: topic, PacketId: 1, Payload: []byte(payload)}
-	s.recv(ctx, messageOf(&PubSubMessagePublished{msg: pub}))
+	s.recv(ctx, messageOf(&PubSubMessagePublished{Msg: pub}))
 
 	if !sent {
 		t.Fatalf("expected session to send itself a process message")

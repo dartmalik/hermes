@@ -276,7 +276,7 @@ func (s *Session) recv(ctx hermes.Context, hm hermes.Message) {
 		s.scheduleProcess(ctx)
 
 	case *PubSubMessagePublished:
-		err := s.onStoreMessage(ctx, msg.msg)
+		err := s.onStoreMessage(ctx, msg.Msg)
 		if err != nil {
 			fmt.Printf("failed to store message: %s\n", err.Error())
 		}
@@ -333,8 +333,8 @@ func (s *Session) onSubscribe(ctx hermes.Context, msg *MqttSubscribeMessage) (Mq
 		return 0, nil, err
 	}
 	rep := rm.Payload().(*PubSubSubscribeReply)
-	if rep.err != nil {
-		return 0, nil, rep.err
+	if rep.Err != nil {
+		return 0, nil, rep.Err
 	}
 
 	return msg.PacketId, codes, err
@@ -352,8 +352,8 @@ func (s *Session) onUnsubscribe(ctx hermes.Context, msg *MqttUnsubscribeMessage)
 		return 0, err
 	}
 	rep := rm.Payload().(*PubSubUnsubscribeReply)
-	if rep.err != nil {
-		return 0, rep.err
+	if rep.Err != nil {
+		return 0, rep.Err
 	}
 
 	s.store.RemoveSub(string(ctx.ID()), msg.TopicFilters)
@@ -370,18 +370,13 @@ func (s *Session) onPublishMessage(ctx hermes.Context, req *SessionPublishReques
 		return errors.New("duplicate_publish")
 	}
 
-	rm, err := ctx.RequestWithTimeout(PubSubID(), &PubSubPublishRequest{msg: req.Msg}, 1500*time.Millisecond)
+	err := PubSubPublish(ctx, req.Msg)
 	if err != nil {
 		return err
 	}
 
 	if req.Msg.QosLevel == MqttQoSLevel2 {
 		s.inbox.Set(req.Msg.PacketId, true)
-	}
-
-	rep := rm.Payload().(*PubSubPublishReply)
-	if rep.err != nil {
-		return rep.err
 	}
 
 	return nil

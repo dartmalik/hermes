@@ -25,7 +25,7 @@ type PubSubSubscribeRequest struct {
 	Topics       []MqttTopicName
 }
 type PubSubSubscribeReply struct {
-	err error
+	Err error
 }
 
 type PubSubUnsubscribeRequest struct {
@@ -33,21 +33,35 @@ type PubSubUnsubscribeRequest struct {
 	Topics       []MqttTopicName
 }
 type PubSubUnsubscribeReply struct {
-	err error
+	Err error
 }
 
 type PubSubPublishRequest struct {
-	msg *MqttPublishMessage
+	Msg *MqttPublishMessage
 }
 type PubSubPublishReply struct {
-	err error
+	Err error
 }
 
 type PubSubMessagePublished struct {
-	msg *MqttPublishMessage
+	Msg *MqttPublishMessage
 }
 
 type pubsubProcessMessages struct{}
+
+func PubSubPublish(ctx hermes.Context, msg *MqttPublishMessage) error {
+	rm, err := ctx.RequestWithTimeout(PubSubID(), &PubSubPublishRequest{Msg: msg}, 1500*time.Millisecond)
+	if err != nil {
+		return err
+	}
+
+	rep := rm.Payload().(*PubSubPublishReply)
+	if rep.Err != nil {
+		return rep.Err
+	}
+
+	return nil
+}
 
 type PubSub struct {
 	sub       map[MqttTopicName]map[hermes.ReceiverID]bool
@@ -76,25 +90,22 @@ func NewPubSub(store MsgStore) (*PubSub, error) {
 	}, nil
 }
 
-func (ps *PubSub) recv(ctx hermes.Context, msg hermes.Message) {
-	switch msg.Payload().(type) {
+func (ps *PubSub) recv(ctx hermes.Context, hm hermes.Message) {
+	switch msg := hm.Payload().(type) {
 	case *hermes.Joined:
 		ps.scheduleProcess(ctx)
 
 	case *PubSubSubscribeRequest:
-		psr := msg.Payload().(*PubSubSubscribeRequest)
-		err := ps.onSubscribe(ctx, psr.SubscriberID, psr.Topics)
-		ctx.Reply(msg, &PubSubSubscribeReply{err: err})
+		err := ps.onSubscribe(ctx, msg.SubscriberID, msg.Topics)
+		ctx.Reply(hm, &PubSubSubscribeReply{Err: err})
 
 	case *PubSubUnsubscribeRequest:
-		pur := msg.Payload().(*PubSubUnsubscribeRequest)
-		err := ps.onUnsubscribe(pur.SubscriberID, pur.Topics)
-		ctx.Reply(msg, &PubSubUnsubscribeReply{err: err})
+		err := ps.onUnsubscribe(msg.SubscriberID, msg.Topics)
+		ctx.Reply(hm, &PubSubUnsubscribeReply{Err: err})
 
 	case *PubSubPublishRequest:
-		ppr := msg.Payload().(*PubSubPublishRequest)
-		err := ps.onPublish(ctx, ppr.msg)
-		ctx.Reply(msg, &PubSubPublishReply{err: err})
+		err := ps.onPublish(ctx, msg.Msg)
+		ctx.Reply(hm, &PubSubPublishReply{Err: err})
 
 	case *pubsubProcessMessages:
 		ps.onProcessMsgs(ctx)
@@ -181,7 +192,7 @@ func (ps *PubSub) onProcessMsgs(ctx hermes.Context) {
 
 func (ps *PubSub) publish(ctx hermes.Context, msg *MqttPublishMessage) {
 	recv := ps.receivers(msg.TopicName)
-	ev := &PubSubMessagePublished{msg: msg}
+	ev := &PubSubMessagePublished{Msg: msg}
 	for id := range recv {
 		ctx.Send(id, ev)
 	}
@@ -214,7 +225,7 @@ func (ps *PubSub) sendRetainedMsgs(ctx hermes.Context, id hermes.ReceiverID, top
 			continue
 		}
 
-		ev := &PubSubMessagePublished{msg: m}
+		ev := &PubSubMessagePublished{Msg: m}
 		err = ctx.Send(id, ev)
 		if err != nil {
 			return err
