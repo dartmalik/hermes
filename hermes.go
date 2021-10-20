@@ -286,13 +286,6 @@ const (
 	DefaultIdleTimeout = 5 * 60 * time.Second
 )
 
-/*
-	- delivers messages from senders to receivers
-	- a request message is delivered to a receiver
-	- a response message is delivered to the system (which notifies using the request channel)
-	- the 'to' field is required for send a message and a request
-	- the 'from' field is required when sending a reply
-*/
 type Hermes struct {
 	reqID   uint64
 	factory ReceiverFactory

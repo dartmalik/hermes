@@ -9,40 +9,6 @@ import (
 	"github.com/elliotchance/orderedmap"
 )
 
-/*
-	objective
-	==========
-	*  allow the core pubsub package to be extended by emitting events and requests
-		- ex: [events] implement a presence package that listens to client events to maintain presence
-		- ex: [request] support auth backends that authorize actions such as connects, subs, pubs, etc
-
-	solutions
-	===========
-	* router
-		- messages are forwarded to a group of receivers
-		- routing rules:
-			- if the message is not a request the message is sent to all receivers in the group
-			- if the message is a request, the message is sent to one receiver at a time until it is handled
-
-	* topics
-		- receivers can join a group of receivers
-		- the senders send messages with one of the following deliver modes:
-			- multicast - deliver to all receivers in the group (used for events)
-			- anycast - deliver to one receiver
-			- anycast-chain - deliver to one receiver at a time until handled
-		- the eventbus is
-
-	* to chain or not to chain?
-
-	packages
-	===========
-	* lwt
-	* presence
-	* auth
-	* bridge
-
-*/
-
 var (
 	ErrInvalidEventsList = errors.New("invalid_events")
 	ErrInvalidHandler    = errors.New("invalid_handler")
