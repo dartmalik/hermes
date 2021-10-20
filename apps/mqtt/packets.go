@@ -5,34 +5,34 @@ import (
 	"strings"
 )
 
-type MqttClientId string
+type ClientId string
 
-type MqttQoSLevel int
+type QoSLevel int
 
 const (
-	MqttQoSLevel0     MqttQoSLevel = 0
-	MqttQoSLevel1     MqttQoSLevel = 1
-	MqttQoSLevel2     MqttQoSLevel = 2
-	MqttQosLevelCount MqttQoSLevel = 3
+	QoSLevel0     QoSLevel = 0
+	QoSLevel1     QoSLevel = 1
+	QoSLevel2     QoSLevel = 2
+	QosLevelCount QoSLevel = 3
 )
 
 var (
 	ErrInvalidTopicName = errors.New("invalid_topic_name")
 )
 
-type MqttTopicName string
+type TopicName string
 
-func NewTopicName(value string) (MqttTopicName, error) {
+func NewTopicName(value string) (TopicName, error) {
 	if strings.ContainsAny(value, "#+") {
 		return "", ErrInvalidTopicName
 	}
 
-	return MqttTopicName(value), nil
+	return TopicName(value), nil
 }
 
-type MqttTopicFilter string
+type TopicFilter string
 
-func (f MqttTopicFilter) topicName() MqttTopicName {
+func (f TopicFilter) topicName() TopicName {
 	segments := strings.Split(string(f), "/")
 	var builder strings.Builder
 
@@ -44,150 +44,150 @@ func (f MqttTopicFilter) topicName() MqttTopicName {
 		builder.WriteString(segment)
 	}
 
-	return MqttTopicName(builder.String())
+	return TopicName(builder.String())
 }
 
 const (
-	MqttConnectFlagsReserved     = 1 << 0
-	MqttConnectFlagsCleanSession = 1 << 1
-	MqttConnectFlagsWill         = 1 << 2
-	MqttConnectFlagsWillQoS      = 1<<3 | 1<<4
-	MqttConnectFlagsWillRetain   = 1 << 5
-	MqttConnectFlagsPassword     = 1 << 6
-	MqttConnectFlagsUsername     = 1 << 7
+	ConnectFlagsReserved     = 1 << 0
+	ConnectFlagsCleanSession = 1 << 1
+	ConnectFlagsWill         = 1 << 2
+	ConnectFlagsWillQoS      = 1<<3 | 1<<4
+	ConnectFlagsWillRetain   = 1 << 5
+	ConnectFlagsPassword     = 1 << 6
+	ConnectFlagsUsername     = 1 << 7
 )
 
-type MqttConnectMessage struct {
-	protocol      string
-	protocolLevel uint8
-	flags         uint8
-	keepAlive     uint16
-	clientId      MqttClientId
-	username      string
-	password      string
-	willTopic     MqttTopicName
-	willMsg       []byte
+type ConnectMessage struct {
+	Protocol      string
+	ProtocolLevel uint8
+	Flags         uint8
+	KeepAlive     uint16
+	ClientId      ClientId
+	Username      string
+	Password      string
+	WillTopic     TopicName
+	WillMsg       []byte
 }
 
-func (m *MqttConnectMessage) Reserved() bool {
-	return m.flags&MqttConnectFlagsReserved != 0
+func (m *ConnectMessage) Reserved() bool {
+	return m.Flags&ConnectFlagsReserved != 0
 }
 
-func (m *MqttConnectMessage) HasCleanSession() bool {
-	return m.flags&MqttConnectFlagsCleanSession != 0
+func (m *ConnectMessage) HasCleanSession() bool {
+	return m.Flags&ConnectFlagsCleanSession != 0
 }
 
-func (m *MqttConnectMessage) SetCleanSession(status bool) {
+func (m *ConnectMessage) SetCleanSession(status bool) {
 	if status {
-		m.flags |= MqttConnectFlagsCleanSession
+		m.Flags |= ConnectFlagsCleanSession
 	} else {
-		m.flags = m.flags &^ MqttConnectFlagsCleanSession
+		m.Flags = m.Flags &^ ConnectFlagsCleanSession
 	}
 }
 
-func (m *MqttConnectMessage) HasWill() bool {
-	return m.flags&MqttConnectFlagsWill != 0
+func (m *ConnectMessage) HasWill() bool {
+	return m.Flags&ConnectFlagsWill != 0
 }
 
-func (m *MqttConnectMessage) WillQoS() MqttQoSLevel {
-	q := uint8((m.flags & MqttConnectFlagsWillQoS) >> 3)
+func (m *ConnectMessage) WillQoS() QoSLevel {
+	q := uint8((m.Flags & ConnectFlagsWillQoS) >> 3)
 
 	switch q {
 	case 0:
-		return MqttQoSLevel0
+		return QoSLevel0
 	case 1:
-		return MqttQoSLevel1
+		return QoSLevel1
 	case 2:
-		return MqttQoSLevel2
+		return QoSLevel2
 	default:
-		return MqttQosLevelCount
+		return QosLevelCount
 	}
 }
 
-func (m *MqttConnectMessage) HasWillRetain() bool {
-	return m.flags&MqttConnectFlagsWillRetain != 0
+func (m *ConnectMessage) HasWillRetain() bool {
+	return m.Flags&ConnectFlagsWillRetain != 0
 }
 
-func (m *MqttConnectMessage) HasPassword() bool {
-	return m.flags&MqttConnectFlagsPassword != 0
+func (m *ConnectMessage) HasPassword() bool {
+	return m.Flags&ConnectFlagsPassword != 0
 }
 
-func (m *MqttConnectMessage) HasUsername() bool {
-	return m.flags&MqttConnectFlagsUsername != 0
+func (m *ConnectMessage) HasUsername() bool {
+	return m.Flags&ConnectFlagsUsername != 0
 }
 
 const (
-	MqttConnackFlagsSessionPresent    = 1 << 0
-	MqttConnackCodeAccepted           = 0x00
-	MqttConnackCodeInvalidProtocolVer = 0x01
-	MqttConnackCodeIdRejected         = 0x02
-	MqttConnackCodeUnavailable        = 0x03
-	MqttConnackCodeBadUserOrPass      = 0x04
-	MqttConnackCodeNotAuthz           = 0x05
+	ConnackFlagsSessionPresent    = 1 << 0
+	ConnackCodeAccepted           = 0x00
+	ConnackCodeInvalidProtocolVer = 0x01
+	ConnackCodeIdRejected         = 0x02
+	ConnackCodeUnavailable        = 0x03
+	ConnackCodeBadUserOrPass      = 0x04
+	ConnackCodeNotAuthz           = 0x05
 )
 
-type MqttConnAckMessage struct {
+type ConnAckMessage struct {
 	ackFlags uint8
 	code     uint8
 }
 
-func (m *MqttConnAckMessage) SessionPresent() bool {
-	return m.ackFlags&MqttConnackFlagsSessionPresent != 0
+func (m *ConnAckMessage) SessionPresent() bool {
+	return m.ackFlags&ConnackFlagsSessionPresent != 0
 }
 
-func (m *MqttConnAckMessage) SetSessionPresent(status bool) {
+func (m *ConnAckMessage) SetSessionPresent(status bool) {
 	if status {
-		m.ackFlags |= MqttConnackFlagsSessionPresent
+		m.ackFlags |= ConnackFlagsSessionPresent
 	} else {
-		m.ackFlags = m.ackFlags &^ MqttConnackFlagsSessionPresent
+		m.ackFlags = m.ackFlags &^ ConnackFlagsSessionPresent
 	}
 }
 
-type MqttDisconnectMessage struct{}
+type DisconnectMessage struct{}
 
-type MqttPingReqMessage struct{}
+type PingReqMessage struct{}
 
-type MqttPingRespMessage struct{}
+type PingRespMessage struct{}
 
-type MqttPacketId uint16
+type PacketId uint16
 
-type MqttPublishMessage struct {
-	TopicName MqttTopicName
+type PublishMessage struct {
+	TopicName TopicName
 	Payload   []byte
-	PacketId  MqttPacketId
+	PacketId  PacketId
 	Duplicate bool
-	QosLevel  MqttQoSLevel
+	QosLevel  QoSLevel
 	Retain    bool
 }
 
-type MqttPubAckMessage struct {
-	PacketId MqttPacketId
+type PubAckMessage struct {
+	PacketId PacketId
 }
 
-type MqttPubRecMessage struct {
-	PacketId MqttPacketId
+type PubRecMessage struct {
+	PacketId PacketId
 }
 
-type MqttPubRelMessage struct {
-	PacketId MqttPacketId
+type PubRelMessage struct {
+	PacketId PacketId
 }
 
-type MqttPubCompMessage struct {
-	PacketId MqttPacketId
+type PubCompMessage struct {
+	PacketId PacketId
 }
 
-type MqttSubscription struct {
-	QosLevel    MqttQoSLevel
-	TopicFilter MqttTopicFilter
+type Subscription struct {
+	QosLevel    QoSLevel
+	TopicFilter TopicFilter
 }
 
-type MqttSubscribeMessage struct {
-	PacketId      MqttPacketId
-	Subscriptions []*MqttSubscription
+type SubscribeMessage struct {
+	PacketId      PacketId
+	Subscriptions []*Subscription
 }
 
-func (m *MqttSubscribeMessage) topicFilter() []MqttTopicFilter {
-	filters := make([]MqttTopicFilter, len(m.Subscriptions))
+func (m *SubscribeMessage) topicFilter() []TopicFilter {
+	filters := make([]TopicFilter, len(m.Subscriptions))
 	for _, sub := range m.Subscriptions {
 		filters = append(filters, sub.TopicFilter)
 	}
@@ -195,41 +195,25 @@ func (m *MqttSubscribeMessage) topicFilter() []MqttTopicFilter {
 	return filters
 }
 
-type MqttSubAckStatus uint8
+type SubAckStatus uint8
 
 const (
-	MqttSubAckQos0Success = 0x00
-	MqttSubAckQos1Success = 0x01
-	MqttSubAckQos2Success = 0x02
-	MqttSubAckFailure     = 0x80
+	SubAckQos0Success = 0x00
+	SubAckQos1Success = 0x01
+	SubAckQos2Success = 0x02
+	SubAckFailure     = 0x80
 )
 
-func toSubAckStatus(qosLevel MqttQoSLevel) MqttSubAckStatus {
-	switch qosLevel {
-	case MqttQoSLevel0:
-		return MqttSubAckQos0Success
-
-	case MqttQoSLevel1:
-		return MqttSubAckQos1Success
-
-	case MqttQoSLevel2:
-		return MqttSubAckQos2Success
-
-	default:
-		return MqttSubAckFailure
-	}
+type SubAckMessage struct {
+	PacketId    PacketId
+	ReturnCodes []SubAckStatus
 }
 
-type MqttSubAckMessage struct {
-	PacketId    MqttPacketId
-	ReturnCodes []MqttSubAckStatus
+type UnsubscribeMessage struct {
+	PacketId     PacketId
+	TopicFilters []TopicFilter
 }
 
-type MqttUnsubscribeMessage struct {
-	PacketId     MqttPacketId
-	TopicFilters []MqttTopicFilter
-}
-
-type MqttUnSubAckMessage struct {
-	PacketId MqttPacketId
+type UnSubAckMessage struct {
+	PacketId PacketId
 }

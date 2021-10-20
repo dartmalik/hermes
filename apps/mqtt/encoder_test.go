@@ -5,8 +5,8 @@ import "testing"
 func TestPublish(t *testing.T) {
 	enc := newEncoder()
 	dec := newDecoder()
-	pub := &MqttPublishMessage{
-		TopicName: MqttTopicName("t1"),
+	pub := &PublishMessage{
+		TopicName: TopicName("t1"),
 		Payload:   []byte("test"),
 		QosLevel:  1,
 		PacketId:  1,
@@ -28,7 +28,7 @@ func TestPublish(t *testing.T) {
 		t.Fatalf("expected one message to be decoded")
 	}
 
-	m := msgs[0].(*MqttPublishMessage)
+	m := msgs[0].(*PublishMessage)
 	if m.TopicName != pub.TopicName {
 		t.Error("topic mismatch")
 	}
@@ -52,7 +52,7 @@ func TestPublish(t *testing.T) {
 func TestConnack(t *testing.T) {
 	enc := newEncoder()
 	dec := newDecoder()
-	ack := &MqttConnAckMessage{
+	ack := &ConnAckMessage{
 		code: 1,
 	}
 	ack.SetSessionPresent(true)
@@ -71,7 +71,7 @@ func TestConnack(t *testing.T) {
 		t.Fatal(err.Error())
 	}
 
-	da := msgs[0].(*MqttConnAckMessage)
+	da := msgs[0].(*ConnAckMessage)
 	if !da.SessionPresent() {
 		t.Error("invalid session present")
 	}
@@ -83,7 +83,7 @@ func TestConnack(t *testing.T) {
 func TestPubAck(t *testing.T) {
 	enc := newEncoder()
 	dec := newDecoder()
-	ack := &MqttPubAckMessage{
+	ack := &PubAckMessage{
 		PacketId: 2,
 	}
 
@@ -101,7 +101,7 @@ func TestPubAck(t *testing.T) {
 		t.Fatal("expected one message to be decoded")
 	}
 
-	da := mi[0].(*MqttPubAckMessage)
+	da := mi[0].(*PubAckMessage)
 	if da.PacketId != ack.PacketId {
 		t.Error("packets ids mismatch")
 	}
@@ -110,9 +110,9 @@ func TestPubAck(t *testing.T) {
 func TestSubscribe(t *testing.T) {
 	enc := newEncoder()
 	dec := newDecoder()
-	sub := &MqttSubscribeMessage{
+	sub := &SubscribeMessage{
 		PacketId: 1,
-		Subscriptions: []*MqttSubscription{
+		Subscriptions: []*Subscription{
 			{QosLevel: 2, TopicFilter: "t1"},
 			{QosLevel: 1, TopicFilter: "t2"},
 		},
@@ -132,7 +132,7 @@ func TestSubscribe(t *testing.T) {
 		t.Fatal("expected one message to be decoded")
 	}
 
-	ds := msgs[0].(*MqttSubscribeMessage)
+	ds := msgs[0].(*SubscribeMessage)
 	if ds.PacketId != sub.PacketId {
 		t.Error("packet id mismatch")
 	}

@@ -22,7 +22,7 @@ func PubSubID() hermes.ReceiverID {
 
 type PubSubSubscribeRequest struct {
 	SubscriberID hermes.ReceiverID
-	Topics       []MqttTopicName
+	Topics       []TopicName
 }
 type PubSubSubscribeReply struct {
 	Err error
@@ -30,26 +30,26 @@ type PubSubSubscribeReply struct {
 
 type PubSubUnsubscribeRequest struct {
 	SubscriberID hermes.ReceiverID
-	Topics       []MqttTopicName
+	Topics       []TopicName
 }
 type PubSubUnsubscribeReply struct {
 	Err error
 }
 
 type PubSubPublishRequest struct {
-	Msg *MqttPublishMessage
+	Msg *PublishMessage
 }
 type PubSubPublishReply struct {
 	Err error
 }
 
 type PubSubMessagePublished struct {
-	Msg *MqttPublishMessage
+	Msg *PublishMessage
 }
 
 type pubsubProcessMessages struct{}
 
-func PubSubPublish(ctx hermes.Context, msg *MqttPublishMessage) error {
+func PubSubPublish(ctx hermes.Context, msg *PublishMessage) error {
 	rm, err := ctx.RequestWithTimeout(PubSubID(), &PubSubPublishRequest{Msg: msg}, 1500*time.Millisecond)
 	if err != nil {
 		return err
@@ -64,7 +64,7 @@ func PubSubPublish(ctx hermes.Context, msg *MqttPublishMessage) error {
 }
 
 type PubSub struct {
-	sub       map[MqttTopicName]map[hermes.ReceiverID]bool
+	sub       map[TopicName]map[hermes.ReceiverID]bool
 	msgs      MsgStore
 	offset    []byte
 	pollTimer hermes.Timer
@@ -85,7 +85,7 @@ func NewPubSub(store MsgStore) (*PubSub, error) {
 	}
 
 	return &PubSub{
-		sub:  make(map[MqttTopicName]map[hermes.ReceiverID]bool),
+		sub:  make(map[TopicName]map[hermes.ReceiverID]bool),
 		msgs: store,
 	}, nil
 }
@@ -112,7 +112,7 @@ func (ps *PubSub) recv(ctx hermes.Context, hm hermes.Message) {
 	}
 }
 
-func (ps *PubSub) onSubscribe(ctx hermes.Context, id hermes.ReceiverID, topics []MqttTopicName) error {
+func (ps *PubSub) onSubscribe(ctx hermes.Context, id hermes.ReceiverID, topics []TopicName) error {
 	if id == "" {
 		return errors.New("invalid_receiver_id")
 	}
@@ -123,7 +123,7 @@ func (ps *PubSub) onSubscribe(ctx hermes.Context, id hermes.ReceiverID, topics [
 		return nil
 	}
 
-	subTopics := make([]MqttTopicName, len(topics))
+	subTopics := make([]TopicName, len(topics))
 	for _, t := range topics {
 		recv := ps.receivers(t)
 		if _, ok := recv[id]; ok {
@@ -142,7 +142,7 @@ func (ps *PubSub) onSubscribe(ctx hermes.Context, id hermes.ReceiverID, topics [
 	return nil
 }
 
-func (ps *PubSub) onUnsubscribe(id hermes.ReceiverID, topics []MqttTopicName) error {
+func (ps *PubSub) onUnsubscribe(id hermes.ReceiverID, topics []TopicName) error {
 	if id == "" {
 		return errors.New("invalid_receiver_id")
 	}
@@ -160,7 +160,7 @@ func (ps *PubSub) onUnsubscribe(id hermes.ReceiverID, topics []MqttTopicName) er
 	return nil
 }
 
-func (ps *PubSub) onPublish(ctx hermes.Context, msg *MqttPublishMessage) error {
+func (ps *PubSub) onPublish(ctx hermes.Context, msg *PublishMessage) error {
 	if msg == nil {
 		return errors.New("invalid_message")
 	}
@@ -190,7 +190,7 @@ func (ps *PubSub) onProcessMsgs(ctx hermes.Context) {
 	ps.scheduleProcess(ctx)
 }
 
-func (ps *PubSub) publish(ctx hermes.Context, msg *MqttPublishMessage) {
+func (ps *PubSub) publish(ctx hermes.Context, msg *PublishMessage) {
 	recv := ps.receivers(msg.TopicName)
 	ev := &PubSubMessagePublished{Msg: msg}
 	for id := range recv {
@@ -210,7 +210,7 @@ func (ps *PubSub) scheduleProcess(ctx hermes.Context) {
 	}
 }
 
-func (ps *PubSub) sendRetainedMsgs(ctx hermes.Context, id hermes.ReceiverID, topics []MqttTopicName) error {
+func (ps *PubSub) sendRetainedMsgs(ctx hermes.Context, id hermes.ReceiverID, topics []TopicName) error {
 	if len(topics) <= 0 {
 		return nil
 	}
@@ -235,7 +235,7 @@ func (ps *PubSub) sendRetainedMsgs(ctx hermes.Context, id hermes.ReceiverID, top
 	return nil
 }
 
-func (ps *PubSub) receivers(topic MqttTopicName) map[hermes.ReceiverID]bool {
+func (ps *PubSub) receivers(topic TopicName) map[hermes.ReceiverID]bool {
 	set, ok := ps.sub[topic]
 	if !ok {
 		set = make(map[hermes.ReceiverID]bool)

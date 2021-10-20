@@ -37,7 +37,8 @@
     * lwt
     * websocket server with MQTT packet codecs
 * add compatibility tests to ensure conformance with MQTT 3.1.1 OASIS spec
-* need transparency into what is happening
+* logging, need transparency into what is happening
+* add support for wildcards
 
 ### production readiness
 * auth

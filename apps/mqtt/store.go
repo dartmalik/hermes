@@ -21,29 +21,29 @@ const (
 )
 
 type SessionMessage interface {
-	ID() MqttPacketId
-	QoS() MqttQoSLevel
+	ID() PacketId
+	QoS() QoSLevel
 	Payload() []byte
 	State() int
 	SentAt() time.Time
 	SentCount() int
-	Topic() MqttTopicName
+	Topic() TopicName
 }
 
 type sessionMessage struct {
-	id        MqttPacketId
-	qos       MqttQoSLevel
-	msg       *MqttPublishMessage
+	id        PacketId
+	qos       QoSLevel
+	msg       *PublishMessage
 	state     int
 	sentAt    time.Time
 	sentCount int
 }
 
-func (sm *sessionMessage) ID() MqttPacketId {
+func (sm *sessionMessage) ID() PacketId {
 	return sm.id
 }
 
-func (sm *sessionMessage) QoS() MqttQoSLevel {
+func (sm *sessionMessage) QoS() QoSLevel {
 	return sm.qos
 }
 
@@ -63,7 +63,7 @@ func (sm *sessionMessage) SentCount() int {
 	return sm.sentCount
 }
 
-func (sm *sessionMessage) Topic() MqttTopicName {
+func (sm *sessionMessage) Topic() TopicName {
 	return sm.msg.TopicName
 }
 
@@ -73,45 +73,45 @@ func (sm *sessionMessage) Sent() {
 }
 
 type sessionState struct {
-	sub      map[MqttTopicFilter]*MqttSubscription
+	sub      map[TopicFilter]*Subscription
 	pub      *hermes.Queue
 	outbox   *orderedmap.OrderedMap
-	packetId MqttPacketId
+	packetId PacketId
 }
 
 func newSessionState() *sessionState {
 	return &sessionState{
-		sub:    make(map[MqttTopicFilter]*MqttSubscription),
+		sub:    make(map[TopicFilter]*Subscription),
 		pub:    hermes.NewQueue(),
 		outbox: orderedmap.NewOrderedMap(),
 	}
 }
 
-func (state *sessionState) subscribe(subs []*MqttSubscription) ([]MqttSubAckStatus, error) {
-	codes := make([]MqttSubAckStatus, len(subs))
+func (state *sessionState) subscribe(subs []*Subscription) ([]SubAckStatus, error) {
+	codes := make([]SubAckStatus, len(subs))
 	for si, sub := range subs {
 		if strings.ContainsAny(string(sub.TopicFilter), "#+") { //[MQTT-3.8.3-2]
-			codes[si] = MqttSubAckFailure
+			codes[si] = SubAckFailure
 			continue
 		}
 
-		if sub.QosLevel > MqttQoSLevel2 { //[MQTT-3.8.3-4]
+		if sub.QosLevel > QoSLevel2 { //[MQTT-3.8.3-4]
 			return nil, errors.New("invalid_qos_level")
 		}
 
-		state.sub[sub.TopicFilter] = &MqttSubscription{QosLevel: sub.QosLevel, TopicFilter: sub.TopicFilter}
+		state.sub[sub.TopicFilter] = &Subscription{QosLevel: sub.QosLevel, TopicFilter: sub.TopicFilter}
 	}
 
 	return codes, nil
 }
 
-func (state *sessionState) unsubscribe(filters []MqttTopicFilter) {
+func (state *sessionState) unsubscribe(filters []TopicFilter) {
 	for _, f := range filters {
 		delete(state.sub, f)
 	}
 }
 
-func (state *sessionState) append(msg *MqttPublishMessage) error {
+func (state *sessionState) append(msg *PublishMessage) error {
 	for _, s := range state.sub {
 		if s.TopicFilter.topicName() == msg.TopicName {
 			sm := &sessionMessage{msg: msg, qos: s.QosLevel}
@@ -134,7 +134,7 @@ func (s *sessionState) fetchNewMessages() []SessionMessage {
 		sm.id, sm.sentAt = s.nextPacketId(), time.Now()
 		sm.state = SMStatePublished
 
-		if sm.qos != MqttQoSLevel0 {
+		if sm.qos != QoSLevel0 {
 			s.outbox.Set(sm.id, sm)
 		}
 
@@ -155,11 +155,11 @@ func (s *sessionState) fetchLastInflightMessage(state int) SessionMessage {
 	return nil
 }
 
-func (s *sessionState) removeMsg(pid MqttPacketId) bool {
+func (s *sessionState) removeMsg(pid PacketId) bool {
 	return s.outbox.Delete(pid)
 }
 
-func (s *sessionState) ackMsg(pid MqttPacketId) bool {
+func (s *sessionState) ackMsg(pid PacketId) bool {
 	i, ok := s.outbox.Get(pid)
 	if !ok {
 		return false
@@ -176,7 +176,7 @@ func (s *sessionState) ackMsg(pid MqttPacketId) bool {
 	return true
 }
 
-func (s *sessionState) sentMsg(pid MqttPacketId) error {
+func (s *sessionState) sentMsg(pid PacketId) error {
 	i, ok := s.outbox.Get(pid)
 	if !ok {
 		return ErrSessionMissingMsg
@@ -194,12 +194,12 @@ func (s *sessionState) inflightCap() int {
 }
 
 func (state *sessionState) clean() {
-	state.sub = make(map[MqttTopicFilter]*MqttSubscription)
+	state.sub = make(map[TopicFilter]*Subscription)
 	state.pub = hermes.NewQueue()
 	state.outbox = orderedmap.NewOrderedMap()
 }
 
-func (s *sessionState) nextPacketId() MqttPacketId {
+func (s *sessionState) nextPacketId() PacketId {
 	if s.packetId == math.MaxUint16 {
 		s.packetId = 0
 	} else {
@@ -211,12 +211,12 @@ func (s *sessionState) nextPacketId() MqttPacketId {
 
 type SessionStore interface {
 	Create(sid string) (present bool, err error)
-	AddSub(sid string, subs []*MqttSubscription) ([]MqttSubAckStatus, error)
-	RemoveSub(sid string, filters []MqttTopicFilter) error
-	AppendMsg(sid string, msg *MqttPublishMessage) error
-	RemoveMsg(sid string, pid MqttPacketId) (deleted bool, err error)
-	AckMsg(sid string, pid MqttPacketId) (done bool, err error)
-	SentMsg(sid string, pid MqttPacketId) error
+	AddSub(sid string, subs []*Subscription) ([]SubAckStatus, error)
+	RemoveSub(sid string, filters []TopicFilter) error
+	AppendMsg(sid string, msg *PublishMessage) error
+	RemoveMsg(sid string, pid PacketId) (deleted bool, err error)
+	AckMsg(sid string, pid PacketId) (done bool, err error)
+	SentMsg(sid string, pid PacketId) error
 	Clean(sid string) error
 	FetchNewMessages(sid string) ([]SessionMessage, error)
 	FetchLastInflightMessage(sid string, state int) (SessionMessage, error)
@@ -244,7 +244,7 @@ func (store *InMemSessionStore) Create(sid string) (bool, error) {
 	return false, nil
 }
 
-func (store *InMemSessionStore) AddSub(sid string, subs []*MqttSubscription) ([]MqttSubAckStatus, error) {
+func (store *InMemSessionStore) AddSub(sid string, subs []*Subscription) ([]SubAckStatus, error) {
 	s, ok := store.sessions.Get(sid)
 	if !ok {
 		return nil, ErrSessionMissing
@@ -253,7 +253,7 @@ func (store *InMemSessionStore) AddSub(sid string, subs []*MqttSubscription) ([]
 	return s.(*sessionState).subscribe(subs)
 }
 
-func (store *InMemSessionStore) RemoveSub(sid string, filters []MqttTopicFilter) error {
+func (store *InMemSessionStore) RemoveSub(sid string, filters []TopicFilter) error {
 	s, ok := store.sessions.Get(sid)
 	if !ok {
 		return ErrSessionMissing
@@ -264,7 +264,7 @@ func (store *InMemSessionStore) RemoveSub(sid string, filters []MqttTopicFilter)
 	return nil
 }
 
-func (store *InMemSessionStore) AppendMsg(sid string, msg *MqttPublishMessage) error {
+func (store *InMemSessionStore) AppendMsg(sid string, msg *PublishMessage) error {
 	if msg == nil {
 		return errors.New("invalid_message")
 	}
@@ -277,7 +277,7 @@ func (store *InMemSessionStore) AppendMsg(sid string, msg *MqttPublishMessage) e
 	return s.(*sessionState).append(msg)
 }
 
-func (store *InMemSessionStore) RemoveMsg(sid string, pid MqttPacketId) (bool, error) {
+func (store *InMemSessionStore) RemoveMsg(sid string, pid PacketId) (bool, error) {
 	s, ok := store.sessions.Get(sid)
 	if !ok {
 		return false, ErrSessionMissing
@@ -286,7 +286,7 @@ func (store *InMemSessionStore) RemoveMsg(sid string, pid MqttPacketId) (bool, e
 	return s.(*sessionState).removeMsg(pid), nil
 }
 
-func (store *InMemSessionStore) AckMsg(sid string, pid MqttPacketId) (bool, error) {
+func (store *InMemSessionStore) AckMsg(sid string, pid PacketId) (bool, error) {
 	s, ok := store.sessions.Get(sid)
 	if !ok {
 		return false, ErrSessionMissing
@@ -295,7 +295,7 @@ func (store *InMemSessionStore) AckMsg(sid string, pid MqttPacketId) (bool, erro
 	return s.(*sessionState).ackMsg(pid), nil
 }
 
-func (store *InMemSessionStore) SentMsg(sid string, pid MqttPacketId) error {
+func (store *InMemSessionStore) SentMsg(sid string, pid PacketId) error {
 	s, ok := store.sessions.Get(sid)
 	if !ok {
 		return ErrSessionMissing
@@ -345,13 +345,13 @@ func (store *InMemSessionStore) IsEmpty(sid string) (bool, error) {
 }
 
 type PollResult struct {
-	Msgs   []*MqttPublishMessage
+	Msgs   []*PublishMessage
 	Offset []byte
 }
 
 type MsgStore interface {
-	Put(msg *MqttPublishMessage) error
-	Get(topics []MqttTopicName) ([]*MqttPublishMessage, error)
+	Put(msg *PublishMessage) error
+	Get(topics []TopicName) ([]*PublishMessage, error)
 	Poll(offset []byte) (*PollResult, error)
 }
 
@@ -367,7 +367,7 @@ func NewInMemMsgStore() *InMemMsgStore {
 	}
 }
 
-func (store *InMemMsgStore) Put(msg *MqttPublishMessage) error {
+func (store *InMemMsgStore) Put(msg *PublishMessage) error {
 	if msg == nil {
 		return errors.New("invalid_message")
 	}
@@ -387,19 +387,19 @@ func (store *InMemMsgStore) Put(msg *MqttPublishMessage) error {
 	return err
 }
 
-func (store *InMemMsgStore) Get(topics []MqttTopicName) ([]*MqttPublishMessage, error) {
+func (store *InMemMsgStore) Get(topics []TopicName) ([]*PublishMessage, error) {
 	if len(topics) == 0 {
 		return nil, errors.New("invalid_topics")
 	}
 
-	msgs := make([]*MqttPublishMessage, 0, len(topics))
+	msgs := make([]*PublishMessage, 0, len(topics))
 
 	for _, t := range topics {
 		mi, ok := store.retained.Get(string(t))
 		if !ok {
 			msgs = append(msgs, nil)
 		} else {
-			msgs = append(msgs, mi.(*MqttPublishMessage))
+			msgs = append(msgs, mi.(*PublishMessage))
 		}
 	}
 
@@ -407,9 +407,9 @@ func (store *InMemMsgStore) Get(topics []MqttTopicName) ([]*MqttPublishMessage, 
 }
 
 func (store *InMemMsgStore) Poll(offset []byte) (*PollResult, error) {
-	res := &PollResult{Msgs: make([]*MqttPublishMessage, 0, 1024)}
+	res := &PollResult{Msgs: make([]*PublishMessage, 0, 1024)}
 	for len(res.Msgs) < cap(res.Msgs) && store.msgs.Size() > 0 {
-		res.Msgs = append(res.Msgs, store.msgs.Remove().(*MqttPublishMessage))
+		res.Msgs = append(res.Msgs, store.msgs.Remove().(*PublishMessage))
 	}
 
 	return res, nil

@@ -21,7 +21,7 @@ type LWTJoinReply struct {
 }
 
 type LWT struct {
-	msgs map[MqttClientId]*MqttPublishMessage
+	msgs map[ClientId]*PublishMessage
 }
 
 func NewLWTRecv() hermes.Receiver {
@@ -29,7 +29,7 @@ func NewLWTRecv() hermes.Receiver {
 }
 
 func NewLWT() *LWT {
-	return &LWT{msgs: make(map[MqttClientId]*MqttPublishMessage)}
+	return &LWT{msgs: make(map[ClientId]*PublishMessage)}
 }
 
 func (lwt *LWT) recv(ctx hermes.Context, hm hermes.Message) {
@@ -40,7 +40,7 @@ func (lwt *LWT) recv(ctx hermes.Context, hm hermes.Message) {
 		err := lwt.onJoin(ctx)
 		ctx.Reply(hm, &LWTJoinReply{Err: err})
 
-	case *MqttConnectMessage:
+	case *ConnectMessage:
 		lwt.onConnect(msg)
 
 	case *ClientDisconnected:
@@ -52,29 +52,29 @@ func (lwt *LWT) onJoin(ctx hermes.Context) error {
 	return Join(ctx, []EventID{"client.connected", "client.disconnected"}, ctx.ID())
 }
 
-func (lwt *LWT) onConnect(msg *MqttConnectMessage) {
+func (lwt *LWT) onConnect(msg *ConnectMessage) {
 	if !msg.HasWill() {
 		return
 	}
 
-	if msg.clientId == "" {
+	if msg.ClientId == "" {
 		fmt.Printf("[ERROR] received connect with invalid client ID")
 		return
 	}
 
-	if msg.willMsg == nil {
+	if msg.WillMsg == nil {
 		fmt.Printf("[ERROR] received connect with invalid will message")
 		return
 	}
 
-	if msg.willTopic == "" {
+	if msg.WillTopic == "" {
 		fmt.Printf("[ERROR] received connect with invalid will topic")
 		return
 	}
 
-	lwt.msgs[msg.clientId] = &MqttPublishMessage{
-		TopicName: msg.willTopic,
-		Payload:   msg.willMsg,
+	lwt.msgs[msg.ClientId] = &PublishMessage{
+		TopicName: msg.WillTopic,
+		Payload:   msg.WillMsg,
 		QosLevel:  msg.WillQoS(),
 		Retain:    msg.HasWillRetain(),
 	}

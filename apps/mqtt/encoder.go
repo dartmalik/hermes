@@ -22,41 +22,41 @@ func (enc *Encoder) encode(mi interface{}) ([]byte, error) {
 	}
 
 	switch msg := mi.(type) {
-	case *MqttConnAckMessage:
+	case *ConnAckMessage:
 		return enc.encodeConnack(msg)
 
-	case *MqttPublishMessage:
+	case *PublishMessage:
 		return enc.encodePublish(msg)
 
-	case *MqttPubAckMessage:
+	case *PubAckMessage:
 		return enc.encodePuback(mi)
 
-	case *MqttPubRecMessage:
+	case *PubRecMessage:
 		return enc.encodePuback(mi)
 
-	case *MqttPubRelMessage:
+	case *PubRelMessage:
 		return enc.encodePuback(mi)
 
-	case *MqttPubCompMessage:
+	case *PubCompMessage:
 		return enc.encodePuback(mi)
 
-	case *MqttSubscribeMessage:
+	case *SubscribeMessage:
 		return enc.encodeSubscribe(msg)
 
-	case *MqttSubAckMessage:
+	case *SubAckMessage:
 		return enc.encodeSuback(msg)
 
-	case *MqttUnSubAckMessage:
+	case *UnSubAckMessage:
 		return enc.encodeUnsubAck(msg)
 
-	case *MqttPingRespMessage:
+	case *PingRespMessage:
 		return enc.encodePingresp()
 	}
 
 	return nil, ErrInvalidMsgType
 }
 
-func (enc *Encoder) encodeConnack(msg *MqttConnAckMessage) ([]byte, error) {
+func (enc *Encoder) encodeConnack(msg *ConnAckMessage) ([]byte, error) {
 	vhp := make([]byte, 2)
 
 	if msg.SessionPresent() {
@@ -72,7 +72,7 @@ func (enc *Encoder) encodeConnack(msg *MqttConnAckMessage) ([]byte, error) {
 	return p.pack(), nil
 }
 
-func (enc *Encoder) encodePublish(msg *MqttPublishMessage) ([]byte, error) {
+func (enc *Encoder) encodePublish(msg *PublishMessage) ([]byte, error) {
 	ff := (byte(msg.QosLevel) << 1)
 	if msg.Retain {
 		ff |= 1
@@ -109,23 +109,23 @@ func (enc *Encoder) encodePublish(msg *MqttPublishMessage) ([]byte, error) {
 }
 
 func (enc *Encoder) encodePuback(mi interface{}) ([]byte, error) {
-	var pid MqttPacketId
+	var pid PacketId
 	p := newPacket()
 
 	switch msg := mi.(type) {
-	case *MqttPubAckMessage:
+	case *PubAckMessage:
 		pid = msg.PacketId
 		p.setPType(PacketTypePuback)
 
-	case *MqttPubRecMessage:
+	case *PubRecMessage:
 		pid = msg.PacketId
 		p.setPType(PacketTypePubrec)
 
-	case *MqttPubRelMessage:
+	case *PubRelMessage:
 		pid = msg.PacketId
 		p.setPType(PacketTypePubrel)
 
-	case *MqttPubCompMessage:
+	case *PubCompMessage:
 		pid = msg.PacketId
 		p.setPType(PacketTypePubcomp)
 	}
@@ -137,7 +137,7 @@ func (enc *Encoder) encodePuback(mi interface{}) ([]byte, error) {
 	return p.pack(), nil
 }
 
-func (enc *Encoder) encodeSubscribe(msg *MqttSubscribeMessage) ([]byte, error) {
+func (enc *Encoder) encodeSubscribe(msg *SubscribeMessage) ([]byte, error) {
 	rl := 2
 	for _, sub := range msg.Subscriptions {
 		rl += len(sub.TopicFilter) + 2
@@ -164,7 +164,7 @@ func (enc *Encoder) encodeSubscribe(msg *MqttSubscribeMessage) ([]byte, error) {
 	return p.pack(), nil
 }
 
-func (enc *Encoder) encodeSuback(msg *MqttSubAckMessage) ([]byte, error) {
+func (enc *Encoder) encodeSuback(msg *SubAckMessage) ([]byte, error) {
 	rl := len(msg.ReturnCodes) + 2 // 1*RCs + pid
 
 	vhp := make([]byte, 0, rl)
@@ -181,7 +181,7 @@ func (enc *Encoder) encodeSuback(msg *MqttSubAckMessage) ([]byte, error) {
 	return p.pack(), nil
 }
 
-func (enc *Encoder) encodeUnsubAck(msg *MqttUnSubAckMessage) ([]byte, error) {
+func (enc *Encoder) encodeUnsubAck(msg *UnSubAckMessage) ([]byte, error) {
 	vhp := make([]byte, 0, 2)
 	vhp = enc.encodeUint16(vhp, uint16(msg.PacketId))
 

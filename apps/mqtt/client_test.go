@@ -14,8 +14,8 @@ const waitTime = 1500 * time.Millisecond
 
 var curClientId uint64 = 0
 
-func NewClientId() MqttClientId {
-	return MqttClientId(fmt.Sprintf("c%d", atomic.AddUint64(&curClientId, 1)))
+func NewClientId() ClientId {
+	return ClientId(fmt.Sprintf("c%d", atomic.AddUint64(&curClientId, 1)))
 }
 
 func TestClientConnect(t *testing.T) {
@@ -26,31 +26,31 @@ func TestClientConnect(t *testing.T) {
 
 func TestPubSubQoS0(t *testing.T) {
 	payload := "m1"
-	topic := MqttTopicFilter("test")
+	topic := TopicFilter("test")
 	net := createNet(t)
 	c1 := NewTestClient(NewClientId(), t, net).Init()
 	c2 := NewTestClient(NewClientId(), t, net).Init()
 
-	c2.Subscribe(topic, MqttQoSLevel0)
+	c2.Subscribe(topic, QoSLevel0)
 
 	published := c2.AssertMessageReceived(topic.topicName(), payload)
-	c1.Publish(topic.topicName(), payload, MqttQoSLevel0)
+	c1.Publish(topic.topicName(), payload, QoSLevel0)
 	waitPID(t, published, "expected message to be published")
 
 	c2.AssertMessageNotReceived(SessionRepubTimeout + 1000*time.Millisecond)
 }
 func TestPubSubQoS1(t *testing.T) {
 	payload := "m1"
-	topic := MqttTopicFilter("test")
+	topic := TopicFilter("test")
 	net := createNet(t)
 	c1 := NewTestClient(NewClientId(), t, net).Init()
 	c2 := NewTestClient(NewClientId(), t, net).Init()
 
-	c2.Subscribe(topic, MqttQoSLevel1)
+	c2.Subscribe(topic, QoSLevel1)
 
 	// validate that c2 receives publishes via topic
 	published := c2.AssertMessageReceived(topic.topicName(), payload)
-	c1.Publish(topic.topicName(), payload, MqttQoSLevel1)
+	c1.Publish(topic.topicName(), payload, QoSLevel1)
 	waitPID(t, published, "expected message to be published")
 
 	// validate that messages are republished if not ack'd
@@ -65,16 +65,16 @@ func TestPubSubQoS1(t *testing.T) {
 
 func TestPubSubQoS2(t *testing.T) {
 	payload := "m1"
-	topic := MqttTopicFilter("test")
+	topic := TopicFilter("test")
 	net := createNet(t)
 	c1 := NewTestClient(NewClientId(), t, net).Init()
 	c2 := NewTestClient(NewClientId(), t, net).Init()
 
-	c2.Subscribe(topic, MqttQoSLevel2)
+	c2.Subscribe(topic, QoSLevel2)
 
 	// validate c2 receives messages published to topic
 	published := c2.AssertMessageReceived(topic.topicName(), payload)
-	c1.Publish(topic.topicName(), payload, MqttQoSLevel2)
+	c1.Publish(topic.topicName(), payload, QoSLevel2)
 	waitPID(t, published, "expected message to be published")
 
 	// validate messages are republished if not ack'd
@@ -108,13 +108,13 @@ func (end *TestEndpoint) Close() {
 }
 
 type TestClient struct {
-	id  MqttClientId
+	id  ClientId
 	t   *testing.T
 	net *hermes.Hermes
 	end *TestEndpoint
 }
 
-func NewTestClient(id MqttClientId, t *testing.T, net *hermes.Hermes) *TestClient {
+func NewTestClient(id ClientId, t *testing.T, net *hermes.Hermes) *TestClient {
 	return &TestClient{id: id, t: t, net: net}
 }
 
@@ -125,11 +125,11 @@ func (tc *TestClient) Init() *TestClient {
 	return tc
 }
 
-func (tc *TestClient) Subscribe(filter MqttTopicFilter, qos MqttQoSLevel) {
-	pid := MqttPacketId(1223)
+func (tc *TestClient) Subscribe(filter TopicFilter, qos QoSLevel) {
+	pid := PacketId(1223)
 	gotAck := make(chan bool, 1)
 	tc.end.onWrite = func(msg interface{}) {
-		ack, ok := msg.(*MqttSubAckMessage)
+		ack, ok := msg.(*SubAckMessage)
 		if !ok {
 			tc.t.Fatalf("expected subscribe ack")
 		}
@@ -138,7 +138,7 @@ func (tc *TestClient) Subscribe(filter MqttTopicFilter, qos MqttQoSLevel) {
 			tc.t.Fatalf("invalid suback packet id")
 		}
 
-		if ack.ReturnCodes[0] == MqttSubAckFailure {
+		if ack.ReturnCodes[0] == SubAckFailure {
 			tc.t.Fatalf("subscribe failed")
 		}
 
@@ -154,21 +154,21 @@ func (tc *TestClient) Subscribe(filter MqttTopicFilter, qos MqttQoSLevel) {
 	waitBool(tc.t, gotAck, "expected to receive subscribe ack")
 }
 
-func (tc *TestClient) Publish(topic MqttTopicName, payload string, qos MqttQoSLevel) {
-	pid := MqttPacketId(33455)
+func (tc *TestClient) Publish(topic TopicName, payload string, qos QoSLevel) {
+	pid := PacketId(33455)
 	ackd := make(chan bool, 1)
 
-	if qos == MqttQoSLevel0 {
+	if qos == QoSLevel0 {
 		ackd <- true
 		tc.end.onWrite = func(msg interface{}) {
-			_, ok := msg.(*MqttPubAckMessage)
+			_, ok := msg.(*PubAckMessage)
 			if ok {
 				tc.t.Fatalf("did not expecte QoS0 message to be ackd")
 			}
 		}
-	} else if qos == MqttQoSLevel1 {
+	} else if qos == QoSLevel1 {
 		tc.end.onWrite = func(msg interface{}) {
-			ack, ok := msg.(*MqttPubAckMessage)
+			ack, ok := msg.(*PubAckMessage)
 			if !ok {
 				tc.t.Fatalf("expected PUBACK")
 			}
@@ -177,9 +177,9 @@ func (tc *TestClient) Publish(topic MqttTopicName, payload string, qos MqttQoSLe
 			}
 			ackd <- true
 		}
-	} else if qos == MqttQoSLevel2 {
+	} else if qos == QoSLevel2 {
 		tc.end.onWrite = func(msg interface{}) {
-			ack, ok := msg.(*MqttPubRecMessage)
+			ack, ok := msg.(*PubRecMessage)
 			if !ok {
 				tc.t.Fatalf("expected PUBREC")
 			}
@@ -190,7 +190,7 @@ func (tc *TestClient) Publish(topic MqttTopicName, payload string, qos MqttQoSLe
 		}
 	}
 
-	pub := &MqttPublishMessage{TopicName: topic, Payload: []byte(payload), PacketId: pid, QosLevel: qos}
+	pub := &PublishMessage{TopicName: topic, Payload: []byte(payload), PacketId: pid, QosLevel: qos}
 	err := tc.net.Send("", clientID(string(tc.id)), pub)
 	if err != nil {
 		tc.t.Fatalf("failed to publish message: %s\n", err.Error())
@@ -198,16 +198,16 @@ func (tc *TestClient) Publish(topic MqttTopicName, payload string, qos MqttQoSLe
 
 	waitBool(tc.t, ackd, "expected to receive an ack for publish")
 
-	if qos == MqttQoSLevel2 { // send PUBREL
+	if qos == QoSLevel2 { // send PUBREL
 		tc.pubrel(pid)
 	}
 }
 
-func (tc *TestClient) AssertMessageReceived(topic MqttTopicName, payload string) chan MqttPacketId {
-	published := make(chan MqttPacketId, 1)
+func (tc *TestClient) AssertMessageReceived(topic TopicName, payload string) chan PacketId {
+	published := make(chan PacketId, 1)
 
 	tc.end.onWrite = func(msg interface{}) {
-		pub, ok := msg.(*MqttPublishMessage)
+		pub, ok := msg.(*PublishMessage)
 		if !ok {
 			tc.t.Fatalf("expected message to be published")
 		}
@@ -225,7 +225,7 @@ func (tc *TestClient) AssertMessageNotReceived(timeout time.Duration) {
 	published := make(chan bool, 1)
 
 	tc.end.onWrite = func(msg interface{}) {
-		_, ok := msg.(*MqttPublishMessage)
+		_, ok := msg.(*PublishMessage)
 		if ok {
 			published <- true
 		}
@@ -239,18 +239,18 @@ func (tc *TestClient) AssertMessageNotReceived(timeout time.Duration) {
 	}
 }
 
-func (tc *TestClient) PubAck(pid MqttPacketId) {
-	ack := &MqttPubAckMessage{PacketId: pid}
+func (tc *TestClient) PubAck(pid PacketId) {
+	ack := &PubAckMessage{PacketId: pid}
 	err := tc.net.Send("", clientID(string(tc.id)), ack)
 	if err != nil {
 		tc.t.Fatalf("failed to send PUBCOMP: %s\n", err.Error())
 	}
 }
 
-func (tc *TestClient) PubRec(pid MqttPacketId) {
+func (tc *TestClient) PubRec(pid PacketId) {
 	gotAck := make(chan bool, 1)
 	tc.end.onWrite = func(mi interface{}) {
-		msg, ok := mi.(*MqttPubRelMessage)
+		msg, ok := mi.(*PubRelMessage)
 		if !ok {
 			tc.t.Fatalf("expected to receive PUBREL but got %T", mi)
 		}
@@ -262,7 +262,7 @@ func (tc *TestClient) PubRec(pid MqttPacketId) {
 		gotAck <- true
 	}
 
-	ack := &MqttPubRecMessage{PacketId: pid}
+	ack := &PubRecMessage{PacketId: pid}
 	err := tc.net.Send("", clientID(string(tc.id)), ack)
 	if err != nil {
 		tc.t.Fatalf("failed to send PUBREC: %s\n", err.Error())
@@ -271,8 +271,8 @@ func (tc *TestClient) PubRec(pid MqttPacketId) {
 	waitBool(tc.t, gotAck, "expected PUBREC to be ack'd")
 }
 
-func (tc *TestClient) PubComp(pid MqttPacketId) {
-	ack := &MqttPubCompMessage{PacketId: pid}
+func (tc *TestClient) PubComp(pid PacketId) {
+	ack := &PubCompMessage{PacketId: pid}
 	err := tc.net.Send("", clientID(string(tc.id)), ack)
 	if err != nil {
 		tc.t.Fatalf("failed to send PUBCOMP: %s\n", err.Error())
@@ -292,7 +292,7 @@ func (tc *TestClient) createEndpoint() {
 func (tc *TestClient) connect() {
 	gotAck := make(chan bool, 1)
 	tc.end.onWrite = func(mi interface{}) {
-		msg, ok := mi.(*MqttConnAckMessage)
+		msg, ok := mi.(*ConnAckMessage)
 		if !ok {
 			tc.t.Fatalf("expected a connack message")
 		}
@@ -301,7 +301,7 @@ func (tc *TestClient) connect() {
 			tc.t.Fatalf("did not expect the session to be present")
 		}
 
-		if msg.code != MqttConnackCodeAccepted {
+		if msg.code != ConnackCodeAccepted {
 			tc.t.Fatalf("expected the code = accepted")
 		}
 
@@ -317,10 +317,10 @@ func (tc *TestClient) connect() {
 	waitBool(tc.t, gotAck, "expected connect to be ack'd")
 }
 
-func (tc *TestClient) pubrel(pid MqttPacketId) {
+func (tc *TestClient) pubrel(pid PacketId) {
 	completed := make(chan bool, 1)
 	tc.end.onWrite = func(msg interface{}) {
-		ack, ok := msg.(*MqttPubCompMessage)
+		ack, ok := msg.(*PubCompMessage)
 		if !ok {
 			tc.t.Fatalf("expected PUBCOMP")
 		}
@@ -330,7 +330,7 @@ func (tc *TestClient) pubrel(pid MqttPacketId) {
 		completed <- true
 	}
 
-	pubrel := &MqttPubRelMessage{PacketId: pid}
+	pubrel := &PubRelMessage{PacketId: pid}
 	err := tc.net.Send("", clientID(string(tc.id)), pubrel)
 	if err != nil {
 		tc.t.Fatalf("failed to publish message: %s\n", err.Error())
@@ -339,14 +339,14 @@ func (tc *TestClient) pubrel(pid MqttPacketId) {
 	waitBool(tc.t, completed, "expected publish to be released")
 }
 
-func createConnect(cid MqttClientId) *MqttConnectMessage {
-	return &MqttConnectMessage{protocol: "MQTT", protocolLevel: 4, clientId: cid}
+func createConnect(cid ClientId) *ConnectMessage {
+	return &ConnectMessage{Protocol: "MQTT", ProtocolLevel: 4, ClientId: cid}
 }
 
-func createSubscribe(pid MqttPacketId, topic MqttTopicFilter, qos MqttQoSLevel) *MqttSubscribeMessage {
-	return &MqttSubscribeMessage{
+func createSubscribe(pid PacketId, topic TopicFilter, qos QoSLevel) *SubscribeMessage {
+	return &SubscribeMessage{
 		PacketId: pid,
-		Subscriptions: []*MqttSubscription{
+		Subscriptions: []*Subscription{
 			{QosLevel: qos, TopicFilter: topic},
 		},
 	}
@@ -356,7 +356,7 @@ var sessionStore = NewInMemSessionStore()
 
 func recvFactory(id hermes.ReceiverID) (hermes.Receiver, error) {
 	if IsClientID(id) {
-		return NewClient().preConnectRecv, nil
+		return NewClientRecv(), nil
 	} else if IsSessionID(id) {
 		s, err := newSession(sessionStore, SessionRepubTimeout)
 		if err != nil {
@@ -393,7 +393,7 @@ func waitBool(t *testing.T, ch chan bool, err string) {
 	}
 }
 
-func waitPID(t *testing.T, ch chan MqttPacketId, err string) MqttPacketId {
+func waitPID(t *testing.T, ch chan PacketId, err string) PacketId {
 	select {
 	case pid := <-ch:
 		return pid

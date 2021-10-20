@@ -85,7 +85,7 @@ func TestMessageDelivery(t *testing.T) {
 	ctx := &TestContext{id: "s1"}
 	s := createSession(t)
 	cid := hermes.ReceiverID("c1")
-	topic := MqttTopicName("t")
+	topic := TopicName("t")
 
 	testConsumerRegister(t, ctx, s, cid)
 	testSubscribeTopic(t, ctx, s, topic)
@@ -101,7 +101,7 @@ func TestMultipleMessageDelivery(t *testing.T) {
 	ctx := &TestContext{id: "s1"}
 	s := createSession(t)
 	cid := hermes.ReceiverID("c1")
-	topic := MqttTopicName("t")
+	topic := TopicName("t")
 
 	testConsumerRegister(t, ctx, s, cid)
 	testSubscribeTopic(t, ctx, s, topic)
@@ -164,7 +164,7 @@ func testConsumerRegister(t *testing.T, ctx *TestContext, s *Session, cid hermes
 	}
 }
 
-func testSubscribeTopic(t *testing.T, ctx *TestContext, s *Session, topic MqttTopicName) {
+func testSubscribeTopic(t *testing.T, ctx *TestContext, s *Session, topic TopicName) {
 	ctx.onRequestWithTimeout = func(ri hermes.ReceiverID, i interface{}, d time.Duration) (hermes.Message, error) {
 		return messageOf(&PubSubSubscribeReply{}), nil
 	}
@@ -182,17 +182,17 @@ func testSubscribeTopic(t *testing.T, ctx *TestContext, s *Session, topic MqttTo
 		replied = true
 		return nil
 	}
-	subs := []*MqttSubscription{
-		{QosLevel: MqttQoSLevel1, TopicFilter: MqttTopicFilter(topic)},
+	subs := []*Subscription{
+		{QosLevel: QoSLevel1, TopicFilter: TopicFilter(topic)},
 	}
-	s.recv(ctx, messageOf(&MqttSubscribeMessage{PacketId: 1, Subscriptions: subs}))
+	s.recv(ctx, messageOf(&SubscribeMessage{PacketId: 1, Subscriptions: subs}))
 
 	if !replied {
 		t.Fatalf("expected session to reply to subscribe")
 	}
 }
 
-func testPublishMessage(t *testing.T, ctx *TestContext, s *Session, topic MqttTopicName, payload string) {
+func testPublishMessage(t *testing.T, ctx *TestContext, s *Session, topic TopicName, payload string) {
 	sent := false
 	ctx.onSend = func(ri hermes.ReceiverID, i interface{}) error {
 		if _, ok := i.(*sessionProcessPublishes); !ok {
@@ -202,7 +202,7 @@ func testPublishMessage(t *testing.T, ctx *TestContext, s *Session, topic MqttTo
 		return nil
 	}
 
-	pub := &MqttPublishMessage{TopicName: topic, PacketId: 1, Payload: []byte(payload)}
+	pub := &PublishMessage{TopicName: topic, PacketId: 1, Payload: []byte(payload)}
 	s.recv(ctx, messageOf(&PubSubMessagePublished{Msg: pub}))
 
 	if !sent {
@@ -210,7 +210,7 @@ func testPublishMessage(t *testing.T, ctx *TestContext, s *Session, topic MqttTo
 	}
 }
 
-func testPublishProcess(t *testing.T, ctx *TestContext, s *Session, topic MqttTopicName, pub string) {
+func testPublishProcess(t *testing.T, ctx *TestContext, s *Session, topic TopicName, pub string) {
 	sent := false
 	ctx.onSend = func(ri hermes.ReceiverID, i interface{}) error {
 		smp, ok := i.(*SessionMessagePublished)

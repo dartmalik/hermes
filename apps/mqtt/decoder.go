@@ -289,7 +289,7 @@ func (dec *Decoder) decodeConnect() (interface{}, error) {
 	}
 
 	cf, vhp, err := dec.decodeUint8(vhp)
-	if err != nil || cf&MqttConnectFlagsReserved != 0 {
+	if err != nil || cf&ConnectFlagsReserved != 0 {
 		return nil, ErrCodecInvalidConnectFlags
 	}
 
@@ -305,7 +305,7 @@ func (dec *Decoder) decodeConnect() (interface{}, error) {
 
 	var willTopic string
 	var willMsg []byte
-	if cf&MqttConnectFlagsWill != 0 {
+	if cf&ConnectFlagsWill != 0 {
 		willTopic, vhp, err = dec.decodeStr(vhp)
 		if err != nil {
 			return nil, ErrCodecInvalidWillTopic
@@ -316,18 +316,18 @@ func (dec *Decoder) decodeConnect() (interface{}, error) {
 			return nil, ErrCodecInvalidWillMsg
 		}
 
-		willQoS := MqttQoSLevel((cf & MqttConnectFlagsWillQoS) >> 3)
-		if willQoS > MqttQoSLevel2 {
+		willQoS := QoSLevel((cf & ConnectFlagsWillQoS) >> 3)
+		if willQoS > QoSLevel2 {
 			return nil, ErrCodecInvalidWillQos
 		}
 	} else {
-		if cf&MqttConnectFlagsWillQoS != 0 || cf&MqttConnectFlagsWillRetain != 0 {
+		if cf&ConnectFlagsWillQoS != 0 || cf&ConnectFlagsWillRetain != 0 {
 			return nil, ErrCodecInvalidWillFlags
 		}
 	}
 
 	var username string
-	if cf&MqttConnectFlagsUsername != 0 {
+	if cf&ConnectFlagsUsername != 0 {
 		username, vhp, err = dec.decodeStr(vhp)
 		if err != nil {
 			return nil, ErrCodecInvalidUsername
@@ -335,30 +335,30 @@ func (dec *Decoder) decodeConnect() (interface{}, error) {
 	}
 
 	var password string
-	if cf&MqttConnectFlagsPassword != 0 {
+	if cf&ConnectFlagsPassword != 0 {
 		password, _, err = dec.decodeStr(vhp)
 		if err != nil {
 			return nil, ErrCodecInvalidPassword
 		}
 	}
 
-	msg := &MqttConnectMessage{
-		protocol:      proto,
-		protocolLevel: plvl,
-		flags:         cf,
-		keepAlive:     ka,
-		clientId:      MqttClientId(cid),
-		username:      username,
-		password:      password,
-		willTopic:     MqttTopicName(willTopic),
-		willMsg:       willMsg,
+	msg := &ConnectMessage{
+		Protocol:      proto,
+		ProtocolLevel: plvl,
+		Flags:         cf,
+		KeepAlive:     ka,
+		ClientId:      ClientId(cid),
+		Username:      username,
+		Password:      password,
+		WillTopic:     TopicName(willTopic),
+		WillMsg:       willMsg,
 	}
 
 	return msg, nil
 }
 
 func (dec *Decoder) decodeConnack() (interface{}, error) {
-	msg := &MqttConnAckMessage{}
+	msg := &ConnAckMessage{}
 
 	msg.SetSessionPresent(dec.packet.vhp[0]&0x1 != 0)
 	msg.code = dec.packet.vhp[1]
@@ -368,14 +368,14 @@ func (dec *Decoder) decodeConnack() (interface{}, error) {
 
 func (dec *Decoder) decodePublish() (interface{}, error) {
 	ff := dec.packet.flags()
-	qos := MqttQoSLevel((ff & 0x06) >> 1)
+	qos := QoSLevel((ff & 0x06) >> 1)
 	dup := (ff&0x08)>>3 != 0
 	retain := (ff & 0x01) != 0
 
-	if qos > MqttQoSLevel2 {
+	if qos > QoSLevel2 {
 		return nil, ErrCodecInvalidFixedFlags
 	}
-	if qos == MqttQoSLevel0 && dup {
+	if qos == QoSLevel0 && dup {
 		return nil, ErrCodecInvalidFixedFlags
 	}
 
@@ -384,8 +384,8 @@ func (dec *Decoder) decodePublish() (interface{}, error) {
 		return nil, ErrInvalidTopicName
 	}
 
-	var pid MqttPacketId
-	if qos > MqttQoSLevel0 {
+	var pid PacketId
+	if qos > QoSLevel0 {
 		pid, vhp, err = dec.decodePID(vhp, qos)
 		if err != nil {
 			return nil, ErrCodecInvalidPacketID
@@ -399,14 +399,14 @@ func (dec *Decoder) decodePublish() (interface{}, error) {
 		return nil, ErrCodecInvalidPayload
 	}
 
-	msg := &MqttPublishMessage{
+	msg := &PublishMessage{
 		TopicName: topic,
 		Payload:   payload,
 		Duplicate: dup,
 		QosLevel:  qos,
 		Retain:    retain,
 	}
-	if qos > MqttQoSLevel0 {
+	if qos > QoSLevel0 {
 		msg.PacketId = pid
 	}
 
@@ -414,35 +414,35 @@ func (dec *Decoder) decodePublish() (interface{}, error) {
 }
 
 func (dec *Decoder) decodePuback() (interface{}, error) {
-	pid, _, err := dec.decodePID(dec.packet.vhp, MqttQoSLevel2)
+	pid, _, err := dec.decodePID(dec.packet.vhp, QoSLevel2)
 	if err != nil {
 		return nil, ErrCodecInvalidPacketID
 	}
 
 	switch dec.packet.pType() {
 	case PacketTypePuback:
-		return &MqttPubAckMessage{PacketId: MqttPacketId(pid)}, nil
+		return &PubAckMessage{PacketId: PacketId(pid)}, nil
 
 	case PacketTypePubrec:
-		return &MqttPubRecMessage{PacketId: pid}, nil
+		return &PubRecMessage{PacketId: pid}, nil
 
 	case PacketTypePubrel:
-		return &MqttPubRelMessage{PacketId: pid}, nil
+		return &PubRelMessage{PacketId: pid}, nil
 
 	case PacketTypePubcomp:
-		return &MqttPubCompMessage{PacketId: pid}, nil
+		return &PubCompMessage{PacketId: pid}, nil
 	}
 
 	return nil, ErrCodecInvalidPacketType
 }
 
 func (dec *Decoder) decodeSubscribe() (interface{}, error) {
-	pid, vhp, err := dec.decodePID(dec.packet.vhp, MqttQoSLevel2)
+	pid, vhp, err := dec.decodePID(dec.packet.vhp, QoSLevel2)
 	if err != nil {
 		return nil, ErrCodecInvalidPacketID
 	}
 
-	sm := make(map[int]*MqttSubscription)
+	sm := make(map[int]*Subscription)
 	si := 0
 	for len(vhp) > 0 {
 		var f string
@@ -453,11 +453,11 @@ func (dec *Decoder) decodeSubscribe() (interface{}, error) {
 
 		var qos uint8
 		qos, vhp, err = dec.decodeUint8(vhp)
-		if err != nil || qos > uint8(MqttQoSLevel2) {
+		if err != nil || qos > uint8(QoSLevel2) {
 			return nil, ErrCodecInvalidSubscription
 		}
 
-		sub := &MqttSubscription{QosLevel: MqttQoSLevel(qos), TopicFilter: MqttTopicFilter(f)}
+		sub := &Subscription{QosLevel: QoSLevel(qos), TopicFilter: TopicFilter(f)}
 		sm[si] = sub
 		si++
 	}
@@ -466,18 +466,18 @@ func (dec *Decoder) decodeSubscribe() (interface{}, error) {
 		return nil, ErrCodecInvalidSubscription
 	}
 
-	subs := make([]*MqttSubscription, 0, len(sm))
+	subs := make([]*Subscription, 0, len(sm))
 	for i := 0; i < len(sm); i++ {
 		subs = append(subs, sm[i])
 	}
 
-	msg := &MqttSubscribeMessage{PacketId: pid, Subscriptions: subs}
+	msg := &SubscribeMessage{PacketId: pid, Subscriptions: subs}
 
 	return msg, nil
 }
 
 func (dec *Decoder) decodeUnsubscribe() (interface{}, error) {
-	pid, vhp, err := dec.decodePID(dec.packet.vhp, MqttQoSLevel2)
+	pid, vhp, err := dec.decodePID(dec.packet.vhp, QoSLevel2)
 	if err != nil {
 		return nil, ErrCodecInvalidPacketID
 	}
@@ -499,22 +499,22 @@ func (dec *Decoder) decodeUnsubscribe() (interface{}, error) {
 		return nil, ErrCodecInvalidPacket
 	}
 
-	filters := make([]MqttTopicFilter, 0, len(fm))
+	filters := make([]TopicFilter, 0, len(fm))
 	for i := 0; i < len(fm); i++ {
-		filters = append(filters, MqttTopicFilter(fm[i]))
+		filters = append(filters, TopicFilter(fm[i]))
 	}
 
-	msg := &MqttUnsubscribeMessage{PacketId: pid, TopicFilters: filters}
+	msg := &UnsubscribeMessage{PacketId: pid, TopicFilters: filters}
 
 	return msg, nil
 }
 
 func (dec *Decoder) decodePingreq() (interface{}, error) {
-	return &MqttPingReqMessage{}, nil
+	return &PingReqMessage{}, nil
 }
 
 func (dec *Decoder) decodeDisconnect() (interface{}, error) {
-	return &MqttDisconnectMessage{}, nil
+	return &DisconnectMessage{}, nil
 }
 
 func (dec *Decoder) decodeUint8(buff []byte) (uint8, []byte, error) {
@@ -567,7 +567,7 @@ func (dec *Decoder) decodeNumBytes(buff []byte, num int) ([]byte, []byte, error)
 	}
 }
 
-func (dec *Decoder) decodeTopicName(buff []byte) (MqttTopicName, []byte, error) {
+func (dec *Decoder) decodeTopicName(buff []byte) (TopicName, []byte, error) {
 	t, buff, err := dec.decodeStr(buff)
 	if err != nil {
 		return "", buff, err
@@ -578,8 +578,8 @@ func (dec *Decoder) decodeTopicName(buff []byte) (MqttTopicName, []byte, error) 
 	return topic, buff, err
 }
 
-func (dec *Decoder) decodePID(buff []byte, qos MqttQoSLevel) (MqttPacketId, []byte, error) {
-	if qos < MqttQoSLevel1 {
+func (dec *Decoder) decodePID(buff []byte, qos QoSLevel) (PacketId, []byte, error) {
+	if qos < QoSLevel1 {
 		return 0, buff, ErrCodecInvalidPacketID
 	}
 
@@ -588,5 +588,5 @@ func (dec *Decoder) decodePID(buff []byte, qos MqttQoSLevel) (MqttPacketId, []by
 		return 0, buff, err
 	}
 
-	return MqttPacketId(ui), buff, nil
+	return PacketId(ui), buff, nil
 }
