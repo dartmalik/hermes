@@ -82,6 +82,24 @@ type eventbus struct {
 	h map[EventID]*orderedmap.OrderedMap
 }
 
+// NewEventBusRecv create an event bus receiver. The event bus can be used
+// to maintain group of receivers that are interested in a particular event.
+// On receipt of an event, the event bus delivers the event based on the
+// deliver mode. Currently two are supported:
+// - multicast: in this mode the event is forwarded to all receivers in a group
+// - chained: in ths mode the event is forward to one receiver at a time in a group in a chain
+//
+// These modes can be used to implement a micro kernel architecture where a main component
+// (the pubsub component in the case of MQTT) can be extended by secondary components by
+// emitting events (client connect and disconnect events) and forwardind requests (auth).
+//
+// Currently, the last will and testament (lwt.go) is implementing using this. In the future,
+// an Auth component is planned to be implemented using this approach. The Auth component will
+// chain multiple backends (HTTP-based, DB-based, File-based) to implement an extensive and
+// extendible Auth system.
+//
+// The above patterns allows application built on top of Hermes to be highly decoupled and
+// extensible at the same time.
 func NewEventBusRecv() hermes.Receiver {
 	b := &eventbus{h: make(map[EventID]*orderedmap.OrderedMap)}
 

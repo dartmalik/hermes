@@ -13,17 +13,18 @@
 
 </br>
 
+## WHY HERMES
+- number of goroutines are reduced since there is one goroutine per active receiver (a receiver receiving messages)
+- the lifecycle of groutines (receivers) is managed since idle receivers are deactivated and all receivers deactived when closed
+- (planned) provide a single abstraction for moving from a concurrent system to a distributed system
+- increases the testability of the system since each receiver can be tested independently
+- easily implement state machines by allowing receivers to change receiving functions in response to messages
+- supports delayed message deliveries
+
+</br>
+
 ## TODO
-- allow receivers to setup timers and tickers
-- determine if parent-child relations should be supported (in a cluster only the root should be partitioned)
-
-### quality
-- add functional tests
-- add benchmark tests
-
-### optimizations
-- improve queue memory mangement
-- workers should signal executor after idle timeout (rather than locking and clearing the list)
+- add support for deleting hermes instance, should wait for all receivers to be deactived and send a signal
 
 </br>
 </br>

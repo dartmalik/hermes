@@ -13,16 +13,21 @@ const (
 	ClientRequestTimeout = 1500 * time.Millisecond
 )
 
+// MqttEndpoint represents the server endpoint of an MQTT connection. This endpoint
+// should have an encoder attached that encodes the passed MQTT messages into binary
+// which then should be sent to the client.
 type MqttEndpoint interface {
 	Write(msg interface{})
 	WriteAndClose(msg interface{})
 	Close()
 }
 
+// IsClientID checks if the passed in ID represents a client
 func IsClientID(id hermes.ReceiverID) bool {
 	return strings.HasPrefix(string(id), ClientIDPrefix)
 }
 
+// generates a Client receiver ID from the specified id
 func clientID(id string) hermes.ReceiverID {
 	return hermes.ReceiverID(ClientIDPrefix + id)
 }
@@ -49,7 +54,7 @@ type ClientDisconnected struct {
 	Manual   bool
 }
 
-type Client struct {
+type client struct {
 	id             ClientId
 	endpoint       MqttEndpoint
 	conTimeout     hermes.Timer
@@ -57,15 +62,35 @@ type Client struct {
 	manualDC       bool
 }
 
+// NewClientRecv creates an MQTT client receiver. There should be one receiver per
+// connection. The client manages the lifecycle of a connection by transitioning
+// between three stages:
+// 1. pre-connect: after an (socket) endpoint is created and before receiving CONNECT packet
+// 2. post-connect: after receving a CONNECT packet
+// 3. dc: after the endpoint disconnects
+//
+// pre-connect:
+// After a connection is established, the pre-connect state waits for a CONNECT packet. And
+// if the packet is not received the connection (endpoint) is closed pre the MQTT spec.
+// If a valid CONNECT packet is received, the client will registered itself with a Session
+// and transition to the post-connect state
+//
+// post-connect:
+// After a successful connect, all MQTT packets (except CONNECt) are processed.
+//
+// dc:
+// Anytime the endpoint is closed the Client transitions to the dc state. Here no messages are
+// processed and all received messages are logged as warning. No state transitions take place from
+// this state.
 func NewClientRecv() hermes.Receiver {
 	return newClient().preConnectRecv
 }
 
-func newClient() *Client {
-	return &Client{}
+func newClient() *client {
+	return &client{}
 }
 
-func (cl *Client) preConnectRecv(ctx hermes.Context, hm hermes.Message) {
+func (cl *client) preConnectRecv(ctx hermes.Context, hm hermes.Message) {
 	switch msg := hm.Payload().(type) {
 	case *hermes.Joined:
 
@@ -87,7 +112,7 @@ func (cl *Client) preConnectRecv(ctx hermes.Context, hm hermes.Message) {
 	}
 }
 
-func (cl *Client) postConnectRecv(ctx hermes.Context, hm hermes.Message) {
+func (cl *client) postConnectRecv(ctx hermes.Context, hm hermes.Message) {
 	switch msg := hm.Payload().(type) {
 	case *ClientEndpointClosed:
 		cl.onEndpointClosed(ctx, true)
@@ -128,11 +153,11 @@ func (cl *Client) postConnectRecv(ctx hermes.Context, hm hermes.Message) {
 	}
 }
 
-func (cl *Client) dcRecv(ctx hermes.Context, msg hermes.Message) {
+func (cl *client) dcRecv(ctx hermes.Context, msg hermes.Message) {
 	fmt.Printf("[WARN] received msg after disconnect: %T\n", msg.Payload())
 }
 
-func (cl *Client) onEndpointOpened(ctx hermes.Context, msg *ClientEndpointOpened) {
+func (cl *client) onEndpointOpened(ctx hermes.Context, msg *ClientEndpointOpened) {
 	cl.endpoint = msg.endpoint
 
 	t, err := ctx.Schedule(ClientConnectTimeout, &ClientConnectRecvFailed{})
@@ -143,7 +168,7 @@ func (cl *Client) onEndpointOpened(ctx hermes.Context, msg *ClientEndpointOpened
 	cl.conTimeout = t
 }
 
-func (cl *Client) onEndpointClosed(ctx hermes.Context, unregister bool) {
+func (cl *client) onEndpointClosed(ctx hermes.Context, unregister bool) {
 	ctx.SetReceiver(cl.dcRecv)
 
 	if unregister {
@@ -153,7 +178,7 @@ func (cl *Client) onEndpointClosed(ctx hermes.Context, unregister bool) {
 	Emit(ctx, EvClientDisconnected, &ClientDisconnected{ClientID: cl.id, Manual: cl.manualDC})
 }
 
-func (cl *Client) onConnect(ctx hermes.Context, msg *ConnectMessage) {
+func (cl *client) onConnect(ctx hermes.Context, msg *ConnectMessage) {
 	cl.conTimeout.Stop()
 	cl.conTimeout = nil
 
@@ -214,7 +239,7 @@ func (cl *Client) onConnect(ctx hermes.Context, msg *ConnectMessage) {
 	ctx.SetReceiver(cl.postConnectRecv)
 }
 
-func (cl *Client) onSubscribe(ctx hermes.Context, msg *SubscribeMessage) {
+func (cl *client) onSubscribe(ctx hermes.Context, msg *SubscribeMessage) {
 	ack, err := SessionSubscribe(ctx, cl.sid(), msg)
 	if err != nil {
 		cl.endpoint.Close()
@@ -223,7 +248,7 @@ func (cl *Client) onSubscribe(ctx hermes.Context, msg *SubscribeMessage) {
 	}
 }
 
-func (cl *Client) onUnsubscribe(ctx hermes.Context, msg *UnsubscribeMessage) {
+func (cl *client) onUnsubscribe(ctx hermes.Context, msg *UnsubscribeMessage) {
 	ack, err := SessionUnsubscribe(ctx, cl.sid(), msg)
 	if err != nil {
 		cl.endpoint.Close()
@@ -232,7 +257,7 @@ func (cl *Client) onUnsubscribe(ctx hermes.Context, msg *UnsubscribeMessage) {
 	}
 }
 
-func (cl *Client) onPublish(ctx hermes.Context, msg hermes.Message, pub *PublishMessage) {
+func (cl *client) onPublish(ctx hermes.Context, msg hermes.Message, pub *PublishMessage) {
 	err := SessionPublish(ctx, cl.sid(), pub)
 	if err != nil {
 		cl.endpoint.Close()
@@ -243,14 +268,14 @@ func (cl *Client) onPublish(ctx hermes.Context, msg hermes.Message, pub *Publish
 	}
 }
 
-func (cl *Client) onPubAck(ctx hermes.Context, ack *PubAckMessage) {
+func (cl *client) onPubAck(ctx hermes.Context, ack *PubAckMessage) {
 	err := SessionPubAck(ctx, cl.sid(), ack.PacketId)
 	if err != nil {
 		cl.endpoint.Close()
 	}
 }
 
-func (cl *Client) onPubRec(ctx hermes.Context, msg *PubRecMessage) {
+func (cl *client) onPubRec(ctx hermes.Context, msg *PubRecMessage) {
 	err := SessionPubRec(ctx, cl.sid(), msg.PacketId)
 	if err != nil {
 		cl.endpoint.Close()
@@ -259,14 +284,14 @@ func (cl *Client) onPubRec(ctx hermes.Context, msg *PubRecMessage) {
 	}
 }
 
-func (cl *Client) onPubComp(ctx hermes.Context, msg *PubCompMessage) {
+func (cl *client) onPubComp(ctx hermes.Context, msg *PubCompMessage) {
 	err := SessionPubComp(ctx, cl.sid(), msg.PacketId)
 	if err != nil {
 		cl.endpoint.Close()
 	}
 }
 
-func (cl *Client) onPubRel(ctx hermes.Context, msg *PubRelMessage) {
+func (cl *client) onPubRel(ctx hermes.Context, msg *PubRelMessage) {
 	err := SessionPubRel(ctx, cl.sid(), msg.PacketId)
 	if err != nil {
 		cl.endpoint.Close()
@@ -275,7 +300,7 @@ func (cl *Client) onPubRel(ctx hermes.Context, msg *PubRelMessage) {
 	}
 }
 
-func (cl *Client) onSessionMessagePublished(ctx hermes.Context, msg *SessionMessagePublished) {
+func (cl *client) onSessionMessagePublished(ctx hermes.Context, msg *SessionMessagePublished) {
 	if msg.Msg.State() == SMStatePublished {
 		pub := cl.toPub(msg.Msg)
 		cl.endpoint.Write(pub)
@@ -291,12 +316,12 @@ func (cl *Client) onSessionMessagePublished(ctx hermes.Context, msg *SessionMess
 	}
 }
 
-func (cl *Client) onDisconnect() {
+func (cl *client) onDisconnect() {
 	cl.manualDC = true
 	cl.endpoint.Close()
 }
 
-func (cl *Client) register(ctx hermes.Context, id ClientId) (bool, error) {
+func (cl *client) register(ctx hermes.Context, id ClientId) (bool, error) {
 	sid := sessionID(id)
 	res, err := ctx.RequestWithTimeout(sid, &SessionRegisterRequest{ConsumerID: ctx.ID()}, ClientRequestTimeout)
 	if err != nil {
@@ -308,7 +333,7 @@ func (cl *Client) register(ctx hermes.Context, id ClientId) (bool, error) {
 	return srr.present, srr.Err
 }
 
-func (cl *Client) unregister(ctx hermes.Context, id ClientId) error {
+func (cl *client) unregister(ctx hermes.Context, id ClientId) error {
 	sid := sessionID(id)
 	res, err := ctx.RequestWithTimeout(sid, &SessionUnregisterRequest{ConsumerID: ctx.ID()}, ClientRequestTimeout)
 	if err != nil {
@@ -320,7 +345,7 @@ func (cl *Client) unregister(ctx hermes.Context, id ClientId) error {
 	return srr.Err
 }
 
-func (cl *Client) clean(ctx hermes.Context, id ClientId) error {
+func (cl *client) clean(ctx hermes.Context, id ClientId) error {
 	_, err := ctx.RequestWithTimeout(cl.sid(), &SessionCleanRequest{}, ClientRequestTimeout)
 	if err != nil {
 		return err
@@ -329,11 +354,11 @@ func (cl *Client) clean(ctx hermes.Context, id ClientId) error {
 	return nil
 }
 
-func (cl *Client) sid() hermes.ReceiverID {
+func (cl *client) sid() hermes.ReceiverID {
 	return sessionID(cl.id)
 }
 
-func (cl *Client) toPub(sm SessionMessage) *PublishMessage {
+func (cl *client) toPub(sm SessionMessage) *PublishMessage {
 	return &PublishMessage{
 		TopicName: sm.Topic(),
 		Payload:   sm.Payload(),
