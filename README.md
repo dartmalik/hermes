@@ -20,6 +20,9 @@
 - increases the testability of the system since each receiver can be tested independently
 - easily implement state machines by allowing receivers to change receiving functions in response to messages
 - supports delayed message deliveries
+- receivers linearizes messages by processing one message at a time. this is helpful in domains with contention (collaborative domains)
+- receivers can be backed by durable state (from a DB), which allows scalling reads (such as ones found in read-modify-write cycles)
+- hermes enables applications that require low latency by allowing state to be cached along with application logic
 
 </br>
 

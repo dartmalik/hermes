@@ -9,12 +9,6 @@ import (
 	"time"
 )
 
-/*
-	goals:
-	- (no-locks, no-async) single threaded, synchronous execution of app code
-	- (single-source-of-exec) each receiver can linearize commands by executing one command at a time
-	- (location-transparency) scalability by spreading out state to a cluster
-*/
 var ErrIllegalState = errors.New("no_capacity")
 
 type Queue struct {
@@ -139,6 +133,10 @@ func (box *Mailbox) post(msg Message) error {
 	}
 
 	return nil
+}
+
+func (box *Mailbox) len() int {
+	return box.msgs.Size()
 }
 
 func (box *Mailbox) process() {
@@ -286,12 +284,18 @@ const (
 	DefaultIdleTimeout = 5 * 60 * time.Second
 )
 
+var (
+	ErrInstanceClosed  = errors.New("hermes_instance_closed")
+	ErrInvalidInstance = errors.New("invalid_instance")
+)
+
 type Hermes struct {
 	reqID   uint64
 	factory ReceiverFactory
 	routers []*Router
 	reqs    *SyncMap
 	seed    maphash.Seed
+	closed  uint32
 }
 
 func New(factory ReceiverFactory) (*Hermes, error) {
@@ -318,11 +322,44 @@ func New(factory ReceiverFactory) (*Hermes, error) {
 	return net, nil
 }
 
+// Close closes the hermes instance. This is a blocking call and will
+// wait on all the routers to be empitied of work.
+func Close(npp **Hermes) error {
+	if npp == nil || *npp == nil {
+		return ErrInvalidInstance
+	}
+
+	net := *npp
+	if !atomic.CompareAndSwapUint32(&net.closed, 0, 1) {
+		return ErrInstanceClosed
+	}
+
+	for _, r := range net.routers {
+		for r.len() > 0 {
+		}
+	}
+
+	*npp = nil
+
+	return nil
+}
+
+// Send sends the specified message payload to the specified receiver
 func (net *Hermes) Send(from ReceiverID, to ReceiverID, payload interface{}) error {
+	if net.isClosed() {
+		return ErrInstanceClosed
+	}
+
 	return net.localSend(&message{from: from, to: to, payload: payload})
 }
 
+// Request implements a Request-Reply pattern by exchaning messages between the sender and receiver
+// The returned channel can be used to wait on the reply.
 func (net *Hermes) Request(from, to ReceiverID, request interface{}) (chan Message, error) {
+	if net.isClosed() {
+		return nil, ErrInstanceClosed
+	}
+
 	m := &message{
 		from:    from,
 		to:      to,
@@ -345,6 +382,9 @@ func (net *Hermes) Request(from, to ReceiverID, request interface{}) (chan Messa
 	return m.replyCh, nil
 }
 
+// RequestWithTimeout wraps the Request function and waits on the reply channel for the specified
+// time. This is helpful in production to avoid being deadlocked. Sending a large timeout is equivalent
+// to wating on a blocking channel.
 func (net *Hermes) RequestWithTimeout(from, to ReceiverID, request interface{}, timeout time.Duration) (Message, error) {
 	replyCh, err := net.Request(from, to, request)
 	if err != nil {
@@ -396,6 +436,10 @@ func (net *Hermes) nextReqID() uint64 {
 	return atomic.AddUint64(&net.reqID, 1)
 }
 
+func (net *Hermes) isClosed() bool {
+	return atomic.LoadUint32(&net.closed) == 1
+}
+
 type SendMessage struct {
 	msg     *message
 	replyCh chan error
@@ -439,6 +483,10 @@ func (r *Router) send(msg *message) error {
 	}
 
 	return <-sm.replyCh
+}
+
+func (r *Router) len() int {
+	return r.cmds.len()
 }
 
 func (r *Router) onMessage(msg Message) {
