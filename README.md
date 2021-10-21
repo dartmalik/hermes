@@ -1,53 +1,21 @@
-# HERMES
-## CONCEPTS
-### introduction
-- hermes is an overlay network that routes messages between senders and receivers
-- hermes implements a single abstraction for writing both concurrent and distributed systems in Go
+# INTRODUCTION
+This repository implement Hermes which is an overlay network that routes messages from senders to receivers. Hermes is inspired from IP routing and actor systems. However, Hermes does not implement any strict structure on the application. Receivers are simple functions that receive messages from the network. Hermes enables (or aims to enables) the following approaches to architecting applications:
+* Structure the applications using a traditional (go) paradigm and use Hermes as a communications and routing layer (similar to IP).
+* Structure the application using an actor-like architecture.
+* A hybrid of the above two approaches.
 
-#### subnet
-- a network of senders and receivers
-- each receiver must be uniquely identified by a (subnet-id, receiver-id) pair
-- senders within one subnet can send messages to receivers in another subnet by specifying the fully-qualified receiver id
-- messages can be sent to receivers within the same subnut using the receiver id only (the subnet id is implied to be the local subnet)
-- each subnet maintains a dynamic routing table that maps receiver addresses to IP addresses (subnet-id, partition-id) => IP address
+# WHY HERMES?
+Currently, Hermes does not support clustering and can be used to implement concurrent applications. Hermes provides the following advantages without support for clustering:
+* Hermes manages the lifecycle of receivers i.e. receivers are instantiated (via the provided receiver factory), activated on message receipt and deactivated when idle. Closing hermes will also deactivates all receivers.
+* The number of goroutines is limited to the number active receivers not the total receivers in the application. That is, the number of goroutines are equivalent to the number of messages being process at any time.
+* Receivers can be tested independently as receivers communicate only via messages and dependent receivers can be mocked.
+* Receivers can set other functions as receivers while processing messages. This allows entities to be in different states.
+* Receivers execute one messages at a time which can reduce contention in some domains (collaborative domains).
+* Receivers can be backed by durable state (from a database for instance). This allows state to be cached and allows the system to scale.
+* Since state is cached on the application, low-latency workload can be supported.
+* Supports timed message delivery for handling things like heartbeats, timeouts, etc
 
-</br>
+After clustering has been supported, Hermes will support a single abstraction for implementing both concurrent and distributed applications. This approach has many production usecases (in many industries) for implementing systems that can not be implement using conventional frameworks.
 
-## WHY HERMES
-- number of goroutines are reduced since there is one goroutine per active receiver (a receiver receiving messages)
-- the lifecycle of groutines (receivers) is managed since idle receivers are deactivated and all receivers deactived when closed
-- (planned) provide a single abstraction for moving from a concurrent system to a distributed system
-- increases the testability of the system since each receiver can be tested independently
-- easily implement state machines by allowing receivers to change receiving functions in response to messages
-- supports delayed message deliveries
-- receivers linearizes messages by processing one message at a time. this is helpful in domains with contention (collaborative domains)
-- receivers can be backed by durable state (from a DB), which allows scalling reads (such as ones found in read-modify-write cycles)
-- hermes enables applications that require low latency by allowing state to be cached along with application logic
-
-</br>
-
-## TODO
-- add support for deleting hermes instance, should wait for all receivers to be deactived and send a signal
-
-</br>
-</br>
-
-# MQTT
-## TODO
-### features
-* feature packages
-    * pubsub (core)
-    * retained messages
-    * lwt
-    * websocket server with MQTT packet codecs
-* add compatibility tests to ensure conformance with MQTT 3.1.1 OASIS spec
-* logging, need transparency into what is happening
-* add support for wildcards
-
-### production readiness
-* auth
-* integrate logging
-* integrate configuration
-* implement Redis-based stores
-* add support for clustering (using remoting and redis)
-* implement plug-in system that acts as an external package that integrates into the core (similar to serer, auth, lwt, etc)
+# GETTING STARTED
+For getting started with Hermes, take a look at the tests and the code documentation. The apps/mqtt directory implements a MQTT 3.1.1 compatible broker using Hermes. This

@@ -289,6 +289,44 @@ var (
 	ErrInvalidInstance = errors.New("invalid_instance")
 )
 
+// Hermes is an overlay network that routes messages between senders and receivers.
+//
+// Concepts
+// ===========
+// Receivers
+// * Functions that receives messages from Hermes (routed from senders).
+// * Receivers are uniquely identified by application specified ID (strings). This
+// allows any sender to send messages to receivers via it's ID.
+// * Each receiver is called in it's own goroutine on receipt of a message. This meas:
+//   - Each receiver runs independently.
+//	 - Each receiver can be treated as single threaded wrt it's own state.
+//   - Passive receivers (that do have messages waiting in it's mailbox) dont use a goroutine.
+//   - Each receiver runs processes one message at a time which allows managing contention.
+//
+// Receiver Factory
+// * Function that is invoked by Hermes to instantiate a receiver.
+// * Can be called concurrently by Hermes and therefore must be safe to call.
+//
+// Request Reply
+// * Implements the request reply pattern via two messages, one from requester to requestee and back.
+// * Returns a reply channel that can be used to wait on the requestee to respond. This allows go idomatic code to be written.
+// * This cal cause deadlocks if there is a cyclical request dependency between multiple receivers.
+// * Can use the RequestWithTimeout function to prevent deadlocks in production and log such errors for fixing these.
+//
+// Why Hermes
+// ============
+// * Hermes manages the lifecycle of receivers i.e. receivers are instantiated (via
+// the provided receiver factory), activated on message receipt and deactivated
+// when idle. Closing hermes will also deactivates all receivers.
+// * The number of goroutines is limited to the number active receivers not the total receivers in the system.
+// * Receivers can be tested independently as receivers communicate only via messages and dependent receivers can be mocked.
+// * Receivers can set other functions as receivers while processing messages. This allows entities to be in different states.
+// * Receivers execute one messages at a time which can reduce contention in some domains (collaborative domains).
+// * Receivers can be backed by durable state (from a database for instance). This allows state to be cached and allows the system to scale.
+// * Since state is cached on the application, low-latency workload can be supported.
+// * Supports timed message delivery for handling things like heartbeats, timeouts, etc
+// * (planned) Supports a single abstraction for support both concurrent and distributed applications.
+//
 type Hermes struct {
 	reqID   uint64
 	factory ReceiverFactory
