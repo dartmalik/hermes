@@ -1,5 +1,5 @@
 # INTRODUCTION
-This repository implement Hermes which is an overlay network that routes messages from senders to receivers. Hermes is inspired from IP routing and actor systems. However, Hermes does not implement any strict structure on the application. Receivers are simple functions that receive messages from the network. Hermes enables (or aims to enables) the following approaches to architecting applications:
+This repository implements Hermes which is an overlay network that routes messages from senders to receivers. Hermes is inspired from IP routing and actor systems. However, Hermes does not implement any strict structure on the application. Receivers are simple functions that receive messages from the network. Hermes enables (or aims to enables) the following approaches to architecting applications:
 * Structure the applications using a traditional (go) paradigm and use Hermes as a communications and routing layer (similar to IP).
 * Structure the application using an actor-like architecture.
 * A hybrid of the above two approaches.
