@@ -103,7 +103,7 @@ func TestIdleReceiver(t *testing.T) {
 		t.Fatalf("send failed with error: %s\n", err.Error())
 	}
 
-	time.Sleep(DefaultIdleTimeout + 100*time.Millisecond)
+	time.Sleep(RouterIdleTimeout + 100*time.Millisecond)
 
 	_, err = net.RequestWithTimeout("", "r", &Ping{}, 5000*time.Millisecond)
 	if err != nil {

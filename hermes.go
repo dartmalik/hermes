@@ -9,7 +9,21 @@ import (
 	"time"
 )
 
-var ErrIllegalState = errors.New("no_capacity")
+const (
+	MailboxIdle = iota
+	MailboxProcessing
+	MailboxStopped
+
+	DefaultNumRouters = 20
+	RouterIdleTimeout = 5 * 60 * time.Second
+)
+
+var (
+	ErrQueueIllegalState     = errors.New("no_capacity")
+	ErrContextInvalidMessage = errors.New("invalid_message")
+	ErrInstanceClosed        = errors.New("hermes_instance_closed")
+	ErrInvalidInstance       = errors.New("invalid_instance")
+)
 
 type Queue struct {
 	mu       sync.Mutex
@@ -27,7 +41,7 @@ func (q *Queue) Add(element interface{}) (int, error) {
 	defer q.mu.Unlock()
 
 	if len(q.elements) >= 8192 {
-		return 8192, ErrIllegalState
+		return 8192, ErrQueueIllegalState
 	}
 
 	q.tail++
@@ -94,12 +108,6 @@ func (q *Queue) Size() int {
 	return len(q.elements)
 }
 
-const (
-	MailboxIdle = iota
-	MailboxProcessing
-	MailboxStopped
-)
-
 type Mailbox struct {
 	msgs      *Queue
 	onProcess func(Message)
@@ -120,7 +128,7 @@ func (box *Mailbox) stop() bool {
 
 func (box *Mailbox) post(msg Message) error {
 	if msg == nil {
-		return ErrInvalidMessage
+		return ErrContextInvalidMessage
 	}
 
 	_, err := box.msgs.Add(msg)
@@ -155,8 +163,6 @@ func (box *Mailbox) processMessages() {
 	}
 	atomic.CompareAndSwapInt32(&box.state, MailboxProcessing, MailboxIdle)
 }
-
-var ErrInvalidMessage = errors.New("invalid_message")
 
 type ReceiverID string
 
@@ -239,7 +245,7 @@ func (ctx *context) Reply(msg Message, reply interface{}) error {
 
 func (ctx *context) Schedule(after time.Duration, msg interface{}) (Timer, error) {
 	if msg == nil {
-		return nil, ErrInvalidMessage
+		return nil, ErrContextInvalidMessage
 	}
 
 	t := time.AfterFunc(after, func() {
@@ -278,16 +284,6 @@ type message struct {
 func (m *message) Payload() interface{} {
 	return m.payload
 }
-
-const (
-	DefaultRouterCount = 20
-	DefaultIdleTimeout = 5 * 60 * time.Second
-)
-
-var (
-	ErrInstanceClosed  = errors.New("hermes_instance_closed")
-	ErrInvalidInstance = errors.New("invalid_instance")
-)
 
 // Hermes is an overlay network that routes messages between senders and receivers.
 //
@@ -342,13 +338,13 @@ func New(factory ReceiverFactory) (*Hermes, error) {
 	}
 
 	net := &Hermes{
-		routers: make([]*Router, DefaultRouterCount),
+		routers: make([]*Router, DefaultNumRouters),
 		reqs:    NewSyncMap(),
 		factory: factory,
 		seed:    maphash.MakeSeed(),
 	}
 
-	for ri := 0; ri < DefaultRouterCount; ri++ {
+	for ri := 0; ri < DefaultNumRouters; ri++ {
 		r, err := newRouter(net, factory)
 		if err != nil {
 			return nil, err
@@ -423,7 +419,10 @@ func (net *Hermes) Request(from, to ReceiverID, request interface{}) (chan Messa
 // RequestWithTimeout wraps the Request function and waits on the reply channel for the specified
 // time. This is helpful in production to avoid being deadlocked. Sending a large timeout is equivalent
 // to wating on a blocking channel.
-func (net *Hermes) RequestWithTimeout(from, to ReceiverID, request interface{}, timeout time.Duration) (Message, error) {
+func (net *Hermes) RequestWithTimeout(
+	from, to ReceiverID,
+	request interface{},
+	timeout time.Duration) (Message, error) {
 	replyCh, err := net.Request(from, to, request)
 	if err != nil {
 		return nil, err
@@ -465,7 +464,7 @@ func (net *Hermes) router(key string) *Router {
 
 	hash.SetSeed(net.seed)
 	hash.WriteString(key)
-	ri := int(hash.Sum64() % DefaultRouterCount)
+	ri := int(hash.Sum64() % DefaultNumRouters)
 
 	return net.routers[ri]
 }
@@ -557,7 +556,7 @@ func (r *Router) onSend(msg *message) error {
 	}
 
 	tm := r.idleTimers[string(msg.to)]
-	tm.Reset(DefaultIdleTimeout)
+	tm.Reset(RouterIdleTimeout)
 
 	return ctx.submit(msg)
 }
@@ -581,7 +580,7 @@ func (r *Router) context(id ReceiverID) (*context, error) {
 	r.ctx[string(id)] = ctx
 	ctx.submit(&message{to: ctx.id, payload: &Joined{}})
 
-	t := time.AfterFunc(DefaultIdleTimeout, func() {
+	t := time.AfterFunc(RouterIdleTimeout, func() {
 		r.onIdleTimeout(ctx)
 	})
 	r.idleTimers[string(id)] = t
