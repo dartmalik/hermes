@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+const (
+	BenchmarkBatchNum = 128
+)
+
 type SendPingRequest struct {
 	to ReceiverID
 }
@@ -145,7 +149,7 @@ func BenchmarkSends(b *testing.B) {
 	fmt.Printf("running test with runs: %d\n", b.N)
 
 	req := &SendPingRequest{}
-	batch(b.N, 128, func(offset, runs int) {
+	batch(b.N, BenchmarkBatchNum, func(offset, runs int) {
 		a1 := ReceiverID("t1")
 		for ri := 0; ri < runs; ri++ {
 			net.Send("", a1, req)
@@ -183,7 +187,7 @@ func BenchmarkCreationAndSends(b *testing.B) {
 	fmt.Printf("running test with runs: %d\n", b.N)
 
 	req := &SendPingRequest{}
-	batch(b.N, 128, func(offset, runs int) {
+	batch(b.N, BenchmarkBatchNum, func(offset, runs int) {
 		for ri := 0; ri < runs; ri++ {
 			a1 := ReceiverID(strconv.Itoa(offset + ri))
 			net.Send("", a1, req)
@@ -204,11 +208,11 @@ func BenchmarkRequests(b *testing.B) {
 
 	fmt.Printf("running test with runs: %d\n", b.N)
 
-	passMessages2(b, net, b.N, 1)
+	passMessages(b, net, b.N, 1)
 }
 
 func passMessages(t Tester, net *Hermes, runs, iter int) {
-	batch(runs, 128, func(offset, len int) {
+	batch(runs, BenchmarkBatchNum, func(offset, len int) {
 		replyChs := make([]chan Message, 0, len*iter)
 
 		for ri := 0; ri < len; ri++ {
@@ -238,37 +242,6 @@ func passMessages(t Tester, net *Hermes, runs, iter int) {
 			}
 		}
 	})
-}
-
-func passMessages2(t Tester, net *Hermes, runs, iter int) {
-	replyChs := make([]chan Message, 0, runs*iter)
-
-	for ri := 0; ri < runs; ri++ {
-		a1 := ReceiverID(fmt.Sprintf("t1-%d", ri))
-		a2 := ReceiverID(fmt.Sprintf("t2-%d", ri))
-
-		for i := 0; i < iter; i++ {
-			replyCh, err := net.Request("", a1, &SendPingRequest{to: a2})
-			if err != nil {
-				t.Fatalf("failed to send ping request: %s\n", err.Error())
-			}
-
-			replyChs = append(replyChs, replyCh)
-		}
-	}
-
-	for _, replyCh := range replyChs {
-		select {
-		case msg := <-replyCh:
-			r := msg.Payload().(*SendPingResponse)
-			if r.err != nil {
-				t.Fatalf("failed to send ping request: %s\n", r.err.Error())
-			}
-
-		case <-time.After(1500 * time.Millisecond):
-			t.Fatalf("request_timeout")
-		}
-	}
 }
 
 func batch(runs, bnum int, cb func(offset, runs int)) {
