@@ -343,14 +343,14 @@ type Hermes struct {
 	closed     uint32
 }
 
-func New(factory ReceiverFactory) (*Hermes, error) {
-	if factory == nil {
+func New(rf ReceiverFactory) (*Hermes, error) {
+	if rf == nil {
 		return nil, errors.New("invalid_factory")
 	}
 
 	net := &Hermes{
 		reqs:       NewSyncMap(),
-		factory:    factory,
+		factory:    rf,
 		seed:       maphash.MakeSeed(),
 		ctx:        make(map[string]*context),
 		idleTimers: make(map[string]*time.Timer),
@@ -459,9 +459,6 @@ func (net *Hermes) reply(msg Message, reply interface{}) error {
 }
 
 func (net *Hermes) localSend(msg *message) error {
-	//r := net.router(string(msg.to))
-	//return net.send(msg)
-
 	sm := &sendMessage{msg: msg, replyCh: make(chan error, 1)}
 	err := net.cmds.post(&message{payload: sm})
 	if err != nil {
