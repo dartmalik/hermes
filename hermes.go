@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"hash/maphash"
-	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -25,101 +24,18 @@ var (
 	ErrInvalidInstance       = errors.New("invalid_instance")
 )
 
-type Queue struct {
-	mu       sync.Mutex
-	elements map[uint64]interface{}
-	head     uint64
-	tail     uint64
-}
-
-func NewQueue() *Queue {
-	return &Queue{elements: make(map[uint64]interface{}), head: 0, tail: 0}
-}
-
-func (q *Queue) Add(element interface{}) (int, error) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	if len(q.elements) >= 8192 {
-		return 8192, ErrQueueIllegalState
-	}
-
-	q.tail++
-	q.elements[q.tail] = element
-
-	if q.head == 0 {
-		q.head = q.tail
-	}
-
-	return len(q.elements), nil
-}
-
-func (q *Queue) Peek() interface{} {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	if len(q.elements) <= 0 {
-		return nil
-	}
-
-	e := q.elements[q.head]
-
-	return e
-}
-
-func (q *Queue) Remove() interface{} {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	if len(q.elements) <= 0 {
-		return nil
-	}
-
-	e := q.elements[q.head]
-	delete(q.elements, q.head)
-	q.head++
-
-	return e
-}
-
-func (q *Queue) RemoveAndPeek() interface{} {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	if len(q.elements) <= 0 {
-		return nil
-	}
-
-	delete(q.elements, q.head)
-	q.head++
-
-	if len(q.elements) <= 0 {
-		return nil
-	}
-	e := q.elements[q.head]
-
-	return e
-}
-
-func (q *Queue) Size() int {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	return len(q.elements)
-}
-
 type Mailbox struct {
-	msgs      *Queue
+	msgs      Queue
 	onProcess func(Message)
 	state     int32
 }
 
-func newMailbox(onProcess func(Message)) (*Mailbox, error) {
-	if onProcess == nil {
+func newMailbox(cap int, processCB func(Message)) (*Mailbox, error) {
+	if processCB == nil {
 		return nil, errors.New("invalid_process_cb")
 	}
 
-	return &Mailbox{msgs: NewQueue(), onProcess: onProcess, state: MailboxIdle}, nil
+	return &Mailbox{msgs: NewSegmentedQueue(cap), onProcess: processCB, state: MailboxIdle}, nil
 }
 
 func (box *Mailbox) stop() bool {
@@ -131,10 +47,7 @@ func (box *Mailbox) post(msg Message) error {
 		return ErrContextInvalidMessage
 	}
 
-	_, err := box.msgs.Add(msg)
-	if err != nil {
-		return err
-	}
+	box.msgs.Add(msg)
 
 	if atomic.CompareAndSwapInt32(&box.state, MailboxIdle, MailboxProcessing) {
 		go box.process()
@@ -143,14 +56,10 @@ func (box *Mailbox) post(msg Message) error {
 	return nil
 }
 
-func (box *Mailbox) len() int {
-	return box.msgs.Size()
-}
-
 func (box *Mailbox) process() {
 	box.processMessages()
 
-	for box.msgs.Size() > 0 &&
+	for !box.msgs.IsEmpty() &&
 		atomic.CompareAndSwapInt32(&box.state, MailboxIdle, MailboxProcessing) {
 		box.processMessages()
 	}
@@ -205,7 +114,7 @@ func newContext(id ReceiverID, net *Hermes, recv Receiver) (*context, error) {
 
 	ctx := &context{id: id, net: net, recv: recv}
 
-	mb, err := newMailbox(ctx.onProcess)
+	mb, err := newMailbox(64, ctx.onProcess)
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +265,7 @@ func New(rf ReceiverFactory) (*Hermes, error) {
 		idleTimers: make(map[string]*time.Timer),
 	}
 
-	cmds, err := newMailbox(net.onCmd)
+	cmds, err := newMailbox(1024, net.onCmd)
 	if err != nil {
 		return nil, err
 	}

@@ -7,7 +7,7 @@ import (
 )
 
 func TestSingle(t *testing.T) {
-	q := NewMPSC(2)
+	q := NewSegmentedQueue(2)
 	if q == nil {
 		t.Fatal("failed to create queue")
 	}
@@ -26,10 +26,14 @@ func TestSingle(t *testing.T) {
 	}
 }
 
+type String struct {
+	val string
+}
+
 func BenchmarkMPSCAddRemove(b *testing.B) {
 	fmt.Printf("benchmark with runs: %d\n", b.N)
 
-	q := NewMPSC(1_000_000)
+	q := NewSegmentedQueue(10_000)
 	if q == nil {
 		b.Fatal("failed to create queue")
 	}
@@ -43,9 +47,10 @@ func BenchmarkMPSCAddRemove(b *testing.B) {
 		}
 	}()
 
-	batch(b.N, 10_000, func(offset, runs int) {
+	v := &String{val: "m1"}
+	batch(b.N, 100_000, func(offset, runs int) {
 		for ri := 0; ri < runs; ri++ {
-			q.Add("m")
+			q.Add(v)
 		}
 	})
 

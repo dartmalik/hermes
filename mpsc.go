@@ -3,36 +3,38 @@ package hermes
 import (
 	"errors"
 	"sync"
-	"sync/atomic"
 )
 
-type mpscSegment struct {
+type syncSegment struct {
+	mu   sync.Mutex
 	elem []interface{}
-	head int32
-	tail int32
-	next *mpscSegment
+	head int
+	tail int
+	next *syncSegment
 }
 
-func newSegment(cap int) *mpscSegment {
-	return &mpscSegment{elem: make([]interface{}, cap), head: 0, tail: -1}
+func newSegment(cap int) *syncSegment {
+	return &syncSegment{elem: make([]interface{}, cap), head: 0, tail: -1}
 }
 
-func (seg *mpscSegment) add(e interface{}) bool {
-	if int(seg.tail) >= len(seg.elem) {
+func (seg *syncSegment) add(e interface{}) bool {
+	seg.mu.Lock()
+	defer seg.mu.Unlock()
+
+	seg.tail++
+	if seg.tail >= len(seg.elem) {
 		return false
 	}
 
-	idx := atomic.AddInt32(&seg.tail, 1)
-	if int(idx) >= len(seg.elem) {
-		return false
-	}
-
-	seg.elem[idx] = e
+	seg.elem[seg.tail] = e
 
 	return true
 }
 
-func (seg *mpscSegment) peek() interface{} {
+func (seg *syncSegment) peek() interface{} {
+	seg.mu.Lock()
+	defer seg.mu.Unlock()
+
 	if seg.isEmpty() {
 		return nil
 	}
@@ -40,10 +42,15 @@ func (seg *mpscSegment) peek() interface{} {
 	return seg.elem[seg.head]
 }
 
-func (seg *mpscSegment) removeAndPeek() interface{} {
+func (seg *syncSegment) removeAndPeek() interface{} {
+	seg.mu.Lock()
+	defer seg.mu.Unlock()
+
 	if seg.isEmpty() {
 		return nil
 	}
+
+	seg.elem[seg.head] = nil
 	seg.head++
 
 	if seg.isEmpty() {
@@ -53,11 +60,11 @@ func (seg *mpscSegment) removeAndPeek() interface{} {
 	return seg.elem[seg.head]
 }
 
-func (seg *mpscSegment) isEmpty() bool {
+func (seg *syncSegment) isEmpty() bool {
 	if int(seg.head) >= len(seg.elem) {
 		return true
 	}
-	if seg.head > atomic.LoadInt32(&seg.tail) {
+	if seg.head > seg.tail {
 		return true
 	}
 
@@ -68,24 +75,34 @@ const (
 	mpscDefaultSegLen = 1024
 )
 
-type MPSC struct {
-	mu   sync.RWMutex
-	cap  int
-	head *mpscSegment
-	tail *mpscSegment
+type Queue interface {
+	Add(elem interface{})
+	Peek() interface{}
+	RemoveAndPeek() interface{}
+	IsEmpty() bool
 }
 
-func NewMPSC(cap int) *MPSC {
+type SegmentedQueue struct {
+	mu   sync.RWMutex
+	cap  int
+	head *syncSegment
+	tail *syncSegment
+}
+
+func NewSegmentedQueue(cap int) *SegmentedQueue {
 	if cap <= 0 {
 		cap = mpscDefaultSegLen
 	}
 
-	seg := newSegment(cap)
+	q := &SegmentedQueue{cap: cap}
 
-	return &MPSC{cap: cap, head: seg, tail: seg}
+	seg := q.newSegment()
+	q.head, q.tail = seg, seg
+
+	return q
 }
 
-func (q *MPSC) Add(elem interface{}) {
+func (q *SegmentedQueue) Add(elem interface{}) {
 	if q.addFast(elem) {
 		return
 	}
@@ -93,7 +110,7 @@ func (q *MPSC) Add(elem interface{}) {
 	q.addSlow(elem)
 }
 
-func (q *MPSC) Peek() interface{} {
+func (q *SegmentedQueue) Peek() interface{} {
 	if q.IsEmpty() {
 		return nil
 	}
@@ -104,7 +121,7 @@ func (q *MPSC) Peek() interface{} {
 	return q.head.peek()
 }
 
-func (q *MPSC) RemoveAndPeek() interface{} {
+func (q *SegmentedQueue) RemoveAndPeek() interface{} {
 	if q.IsEmpty() {
 		return nil
 	}
@@ -115,7 +132,7 @@ func (q *MPSC) RemoveAndPeek() interface{} {
 	return q.head.removeAndPeek()
 }
 
-func (q *MPSC) IsEmpty() bool {
+func (q *SegmentedQueue) IsEmpty() bool {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 
@@ -130,14 +147,14 @@ func (q *MPSC) IsEmpty() bool {
 	return true
 }
 
-func (q *MPSC) addFast(elem interface{}) bool {
+func (q *SegmentedQueue) addFast(elem interface{}) bool {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 
 	return q.tail.add(elem)
 }
 
-func (q *MPSC) addSlow(elem interface{}) {
+func (q *SegmentedQueue) addSlow(elem interface{}) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -145,11 +162,77 @@ func (q *MPSC) addSlow(elem interface{}) {
 		return
 	}
 
-	seg := newSegment(q.cap)
+	seg := q.newSegment()
 	q.tail.next = seg
 	q.tail = seg
 
 	if !q.tail.add(elem) {
 		panic(errors.New("new_segment_full"))
 	}
+}
+
+func (q *SegmentedQueue) newSegment() *syncSegment {
+	return newSegment(q.cap)
+}
+
+type UnboundedQueue struct {
+	mu       sync.Mutex
+	elements map[uint64]interface{}
+	head     uint64
+	tail     uint64
+}
+
+func NewUnboundedQueue() *UnboundedQueue {
+	return &UnboundedQueue{elements: make(map[uint64]interface{}), head: 0, tail: 0}
+}
+
+func (q *UnboundedQueue) Add(element interface{}) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	q.tail++
+	q.elements[q.tail] = element
+
+	if q.head == 0 {
+		q.head = q.tail
+	}
+}
+
+func (q *UnboundedQueue) Peek() interface{} {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if len(q.elements) <= 0 {
+		return nil
+	}
+
+	e := q.elements[q.head]
+
+	return e
+}
+
+func (q *UnboundedQueue) RemoveAndPeek() interface{} {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if len(q.elements) <= 0 {
+		return nil
+	}
+
+	delete(q.elements, q.head)
+	q.head++
+
+	if len(q.elements) <= 0 {
+		return nil
+	}
+	e := q.elements[q.head]
+
+	return e
+}
+
+func (q *UnboundedQueue) IsEmpty() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	return len(q.elements) <= 0
 }
