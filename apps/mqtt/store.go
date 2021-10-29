@@ -18,6 +18,8 @@ const (
 	SMStatePublished
 	SMStateAcked
 	SMStateAny
+
+	SessionStatePubSegLen = 32
 )
 
 type SessionMessage interface {
@@ -74,7 +76,7 @@ func (sm *sessionMessage) Sent() {
 
 type sessionState struct {
 	sub      map[TopicFilter]*Subscription
-	pub      *hermes.Queue
+	pub      hermes.Queue
 	outbox   *orderedmap.OrderedMap
 	packetId PacketId
 }
@@ -82,7 +84,7 @@ type sessionState struct {
 func newSessionState() *sessionState {
 	return &sessionState{
 		sub:    make(map[TopicFilter]*Subscription),
-		pub:    hermes.NewQueue(),
+		pub:    hermes.NewSegmentedQueue(SessionStatePubSegLen),
 		outbox: orderedmap.NewOrderedMap(),
 	}
 }
@@ -115,10 +117,7 @@ func (state *sessionState) append(msg *PublishMessage) error {
 	for _, s := range state.sub {
 		if s.TopicFilter.topicName() == msg.TopicName {
 			sm := &sessionMessage{msg: msg, qos: s.QosLevel}
-			_, err := state.pub.Add(sm)
-			if err != nil {
-				return err
-			}
+			state.pub.Add(sm)
 		}
 	}
 
@@ -129,7 +128,7 @@ func (s *sessionState) fetchNewMessages() []SessionMessage {
 	cap := s.inflightCap()
 	msgs := make([]SessionMessage, 0, cap)
 
-	for mi := 0; mi < cap && s.pub.Size() > 0; mi++ {
+	for mi := 0; mi < cap && !s.pub.IsEmpty(); mi++ {
 		sm := s.pub.Remove().(*sessionMessage)
 		sm.id, sm.sentAt = s.nextPacketId(), time.Now()
 		sm.state = SMStatePublished
@@ -195,7 +194,7 @@ func (s *sessionState) inflightCap() int {
 
 func (state *sessionState) clean() {
 	state.sub = make(map[TopicFilter]*Subscription)
-	state.pub = hermes.NewQueue()
+	state.pub = hermes.NewSegmentedQueue(SessionStatePubSegLen)
 	state.outbox = orderedmap.NewOrderedMap()
 }
 
@@ -341,7 +340,7 @@ func (store *InMemSessionStore) IsEmpty(sid string) (bool, error) {
 
 	st := s.(*sessionState)
 
-	return st.pub.Size() <= 0 || st.inflightCap() <= 0, nil
+	return st.pub.IsEmpty() || st.inflightCap() <= 0, nil
 }
 
 type PollResult struct {
@@ -356,13 +355,13 @@ type MsgStore interface {
 }
 
 type InMemMsgStore struct {
-	msgs     *hermes.Queue
+	msgs     hermes.Queue
 	retained *hermes.SyncMap
 }
 
 func NewInMemMsgStore() *InMemMsgStore {
 	return &InMemMsgStore{
-		msgs:     hermes.NewQueue(),
+		msgs:     hermes.NewSegmentedQueue(2048),
 		retained: hermes.NewSyncMap(),
 	}
 }
@@ -372,19 +371,16 @@ func (store *InMemMsgStore) Put(msg *PublishMessage) error {
 		return errors.New("invalid_message")
 	}
 
-	_, err := store.msgs.Add(msg)
-	if err != nil {
-		return err
-	}
+	store.msgs.Add(msg)
 
 	if msg.Retain {
-		err = store.retained.Put(string(msg.TopicName), msg, true)
+		err := store.retained.Put(string(msg.TopicName), msg, true)
 		if err != nil {
 			return err
 		}
 	}
 
-	return err
+	return nil
 }
 
 func (store *InMemMsgStore) Get(topics []TopicName) ([]*PublishMessage, error) {
@@ -408,7 +404,7 @@ func (store *InMemMsgStore) Get(topics []TopicName) ([]*PublishMessage, error) {
 
 func (store *InMemMsgStore) Poll(offset []byte) (*PollResult, error) {
 	res := &PollResult{Msgs: make([]*PublishMessage, 0, 1024)}
-	for len(res.Msgs) < cap(res.Msgs) && store.msgs.Size() > 0 {
+	for len(res.Msgs) < cap(res.Msgs) && !store.msgs.IsEmpty() {
 		res.Msgs = append(res.Msgs, store.msgs.Remove().(*PublishMessage))
 	}
 

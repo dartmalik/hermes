@@ -42,6 +42,21 @@ func (seg *syncSegment) peek() interface{} {
 	return seg.elem[seg.head]
 }
 
+func (seg *syncSegment) remove() interface{} {
+	seg.mu.Lock()
+	defer seg.mu.Unlock()
+
+	if seg.isEmpty() {
+		return nil
+	}
+
+	e := seg.elem[seg.head]
+	seg.elem[seg.head] = nil
+	seg.head++
+
+	return e
+}
+
 func (seg *syncSegment) removeAndPeek() interface{} {
 	seg.mu.Lock()
 	defer seg.mu.Unlock()
@@ -78,6 +93,7 @@ const (
 type Queue interface {
 	Add(elem interface{})
 	Peek() interface{}
+	Remove() interface{}
 	RemoveAndPeek() interface{}
 	IsEmpty() bool
 }
@@ -119,6 +135,17 @@ func (q *SegmentedQueue) Peek() interface{} {
 	}
 
 	return q.head.peek()
+}
+
+func (q *SegmentedQueue) Remove() interface{} {
+	if q.IsEmpty() {
+		return nil
+	}
+	if q.head.isEmpty() {
+		q.head = q.head.next
+	}
+
+	return q.head.remove()
 }
 
 func (q *SegmentedQueue) RemoveAndPeek() interface{} {
@@ -207,6 +234,22 @@ func (q *UnboundedQueue) Peek() interface{} {
 	}
 
 	e := q.elements[q.head]
+
+	return e
+}
+
+func (q *UnboundedQueue) Remove() interface{} {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if len(q.elements) <= 0 {
+		return nil
+	}
+
+	e := q.elements[q.head]
+
+	delete(q.elements, q.head)
+	q.head++
 
 	return e
 }
