@@ -48,7 +48,7 @@ func BenchmarkMPSCAddRemove(b *testing.B) {
 	}()
 
 	v := &String{val: "m1"}
-	batch(b.N, 100_000, func(offset, runs int) {
+	batch(b.N, 10_000, func(offset, runs int) {
 		for ri := 0; ri < runs; ri++ {
 			q.Add(v)
 		}
