@@ -99,18 +99,18 @@ type Queue interface {
 }
 
 type SegmentedQueue struct {
-	mu   sync.RWMutex
-	cap  int
-	head *syncSegment
-	tail *syncSegment
+	mu     sync.RWMutex
+	segCap int
+	head   *syncSegment
+	tail   *syncSegment
 }
 
-func NewSegmentedQueue(cap int) *SegmentedQueue {
-	if cap <= 0 {
-		cap = mpscDefaultSegLen
+func NewSegmentedQueue(segCap int) *SegmentedQueue {
+	if segCap <= 0 {
+		segCap = mpscDefaultSegLen
 	}
 
-	q := &SegmentedQueue{cap: cap}
+	q := &SegmentedQueue{segCap: segCap}
 
 	seg := q.newSegment()
 	q.head, q.tail = seg, seg
@@ -199,7 +199,7 @@ func (q *SegmentedQueue) addSlow(elem interface{}) {
 }
 
 func (q *SegmentedQueue) newSegment() *syncSegment {
-	return newSegment(q.cap)
+	return newSegment(q.segCap)
 }
 
 type UnboundedQueue struct {
