@@ -395,11 +395,6 @@ func (net *Hermes) Request(from, to ReceiverID, request interface{}) (chan Messa
 		return nil, err
 	}
 
-	err = net.reqs.Put(cmd.corID, &cmd.message, false)
-	if err != nil {
-		return nil, err
-	}
-
 	err = net.localSend(cmd)
 	if err != nil {
 		return nil, err
@@ -458,7 +453,7 @@ func (net *Hermes) localSend(cmd *sendMsgCmd) error {
 func (net *Hermes) onCmd(ci interface{}) {
 	switch cmd := ci.(type) {
 	case *sendMsgCmd:
-		cmd.cmdReplyCh <- net.onSend(&cmd.message)
+		cmd.cmdReplyCh <- net.onSend(cmd)
 
 	case *leaveCmd:
 		net.onIdleReceiver(cmd.id)
@@ -476,7 +471,8 @@ func (net *Hermes) onIdleReceiver(id ReceiverID) {
 	}
 }
 
-func (net *Hermes) onSend(msg *message) error {
+func (net *Hermes) onSend(cmd *sendMsgCmd) error {
+	msg := &cmd.message
 	ctx, err := net.context(msg.to)
 	if err != nil {
 		return err
@@ -485,7 +481,18 @@ func (net *Hermes) onSend(msg *message) error {
 	tm := net.idleTimers[string(msg.to)]
 	tm.Reset(RouterIdleTimeout)
 
-	return ctx.submit(msg)
+	t := cmd.sendType()
+	switch t {
+	case SendRequest:
+		err := net.reqs.Put(cmd.corID, msg, false)
+		if err != nil {
+			return err
+		}
+		fallthrough
+
+	default:
+		return ctx.submit(msg)
+	}
 }
 
 func (net *Hermes) context(id ReceiverID) (*context, error) {
