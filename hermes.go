@@ -20,31 +20,37 @@ const (
 var (
 	ErrQueueIllegalState     = errors.New("no_capacity")
 	ErrContextInvalidMessage = errors.New("invalid_message")
+	ErrContextStopped        = errors.New("context_stopped")
 	ErrInstanceClosed        = errors.New("hermes_instance_closed")
 	ErrInvalidInstance       = errors.New("invalid_instance")
 )
 
+type MailboxProcessCB func(interface{})
+
 type Mailbox struct {
 	msgs      Queue
-	onProcess func(Message)
+	onProcess MailboxProcessCB
 	state     int32
 }
 
-func newMailbox(cap int, processCB func(Message)) (*Mailbox, error) {
-	if processCB == nil {
+func newMailbox(segCap int, cb MailboxProcessCB) (*Mailbox, error) {
+	if cb == nil {
 		return nil, errors.New("invalid_process_cb")
 	}
 
-	return &Mailbox{msgs: NewSegmentedQueue(cap), onProcess: processCB, state: MailboxIdle}, nil
+	return &Mailbox{msgs: NewSegmentedQueue(segCap), onProcess: cb, state: MailboxIdle}, nil
 }
 
 func (box *Mailbox) stop() bool {
 	return atomic.CompareAndSwapInt32(&box.state, MailboxIdle, MailboxStopped)
 }
 
-func (box *Mailbox) post(msg Message) error {
+func (box *Mailbox) post(msg interface{}) error {
 	if msg == nil {
 		return ErrContextInvalidMessage
+	}
+	if atomic.LoadInt32(&box.state) == MailboxStopped {
+		return ErrContextStopped
 	}
 
 	box.msgs.Add(msg)
@@ -143,13 +149,13 @@ func (ctx *context) RequestWithTimeout(to ReceiverID, request interface{}, timeo
 	return ctx.net.RequestWithTimeout(ctx.id, to, request, timeout)
 }
 
-func (ctx *context) Reply(msg Message, reply interface{}) error {
-	im := msg.(*message)
-	if im.to != ctx.id {
+func (ctx *context) Reply(mi Message, reply interface{}) error {
+	msg := mi.(*message)
+	if msg.to != ctx.id {
 		return errors.New("not_the_recipient")
 	}
 
-	return ctx.net.reply(msg, reply)
+	return ctx.net.reply(mi, reply)
 }
 
 func (ctx *context) Schedule(after time.Duration, msg interface{}) (Timer, error) {
@@ -168,8 +174,8 @@ func (ctx *context) stop() bool {
 	return ctx.mailbox.stop()
 }
 
-func (ctx *context) onProcess(msg Message) {
-	ctx.recv(ctx, msg)
+func (ctx *context) onProcess(msg interface{}) {
+	ctx.recv(ctx, msg.(Message))
 }
 
 func (ctx *context) submit(msg Message) error {
@@ -194,13 +200,80 @@ func (m *message) Payload() interface{} {
 	return m.payload
 }
 
-type sendMessage struct {
-	msg     *message
-	replyCh chan error
+const (
+	SendMsg = iota + 1
+	SendRequest
+	SendReply
+)
+
+var (
+	ErrInvalidMsgTo      = errors.New("invalid_msg_to")
+	ErrInvalidMsgFrom    = errors.New("invalid_msg_from")
+	ErrInvalidMsgPayload = errors.New("invalid_msg_payload")
+	ErrInvalidRecvID     = errors.New("invalid_recv_id")
+)
+
+type sendMsgCmd struct {
+	message
+	cmdReplyCh chan error
 }
 
-type receiverIdle struct {
+type leaveCmd struct {
 	id ReceiverID
+}
+
+func (cmd *sendMsgCmd) sendType() int {
+	if cmd.corID != "" {
+		if cmd.replyCh != nil {
+			return SendRequest
+		} else {
+			return SendReply
+		}
+	}
+
+	return SendMsg
+}
+
+func (net *Hermes) newSendCmd(from, to ReceiverID, payload interface{}) (*sendMsgCmd, error) {
+	if to == "" {
+		return nil, ErrInvalidMsgTo
+	}
+	if payload == nil {
+		return nil, ErrInvalidMsgPayload
+	}
+
+	return &sendMsgCmd{
+		message: message{
+			from:    from,
+			to:      to,
+			payload: payload,
+		},
+		cmdReplyCh: make(chan error, 1),
+	}, nil
+}
+
+func (net *Hermes) newRequestCmd(from, to ReceiverID, payload interface{}) (*sendMsgCmd, error) {
+	//if from == "" {
+	//	return nil, ErrInvalidMsgFrom
+	//}
+
+	cmd, err := net.newSendCmd(from, to, payload)
+	if err != nil {
+		return nil, err
+	}
+
+	cmd.corID = fmt.Sprintf("%d", net.nextReqID())
+	cmd.replyCh = make(chan Message, 1)
+
+	return cmd, nil
+}
+
+func (net *Hermes) newLeaveCmd(id ReceiverID) (*leaveCmd, error) {
+	if id == "" {
+		return nil, ErrInvalidRecvID
+	}
+
+	return &leaveCmd{id: id}, nil
 }
 
 // Hermes is an overlay network that routes messages between senders and receivers.
@@ -297,7 +370,17 @@ func (net *Hermes) Send(from ReceiverID, to ReceiverID, payload interface{}) err
 		return ErrInstanceClosed
 	}
 
-	return net.localSend(&message{from: from, to: to, payload: payload})
+	cmd, err := net.newSendCmd(from, to, payload)
+	if err != nil {
+		return err
+	}
+
+	err = net.localSend(cmd)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Request implements a Request-Reply pattern by exchaning messages between the sender and receiver
@@ -307,26 +390,22 @@ func (net *Hermes) Request(from, to ReceiverID, request interface{}) (chan Messa
 		return nil, ErrInstanceClosed
 	}
 
-	m := &message{
-		from:    from,
-		to:      to,
-		corID:   fmt.Sprintf("%d", net.nextReqID()),
-		payload: request,
-		replyCh: make(chan Message, 1),
-	}
-
-	err := net.reqs.Put(m.corID, m, false)
+	cmd, err := net.newRequestCmd(from, to, request)
 	if err != nil {
 		return nil, err
 	}
 
-	err = net.localSend(m)
+	err = net.reqs.Put(cmd.corID, &cmd.message, false)
 	if err != nil {
-		net.reqs.Delete(m.corID)
 		return nil, err
 	}
 
-	return m.replyCh, nil
+	err = net.localSend(cmd)
+	if err != nil {
+		return nil, err
+	}
+
+	return cmd.replyCh, nil
 }
 
 // RequestWithTimeout wraps the Request function and waits on the reply channel for the specified
@@ -367,25 +446,22 @@ func (net *Hermes) reply(msg Message, reply interface{}) error {
 	return nil
 }
 
-func (net *Hermes) localSend(msg *message) error {
-	sm := &sendMessage{msg: msg, replyCh: make(chan error, 1)}
-	err := net.cmds.post(&message{payload: sm})
+func (net *Hermes) localSend(cmd *sendMsgCmd) error {
+	err := net.cmds.post(cmd)
 	if err != nil {
 		return err
 	}
 
-	return <-sm.replyCh
+	return <-cmd.cmdReplyCh
 }
 
-func (net *Hermes) onCmd(msg Message) {
-	switch msg.Payload().(type) {
-	case *sendMessage:
-		sm := msg.Payload().(*sendMessage)
-		sm.replyCh <- net.onSend(sm.msg)
+func (net *Hermes) onCmd(ci interface{}) {
+	switch cmd := ci.(type) {
+	case *sendMsgCmd:
+		cmd.cmdReplyCh <- net.onSend(&cmd.message)
 
-	case *receiverIdle:
-		ri := msg.Payload().(*receiverIdle)
-		net.onIdleReceiver(ri.id)
+	case *leaveCmd:
+		net.onIdleReceiver(cmd.id)
 	}
 }
 
@@ -440,7 +516,13 @@ func (net *Hermes) context(id ReceiverID) (*context, error) {
 }
 
 func (net *Hermes) onIdleTimeout(ctx *context) {
-	net.cmds.post(&message{payload: &receiverIdle{id: ctx.id}})
+	cmd, err := net.newLeaveCmd(ctx.ID())
+	if err != nil {
+		fmt.Printf("[ERROR] received idle timeout for invalid receiver")
+		return
+	}
+
+	net.cmds.post(cmd)
 }
 
 func (net *Hermes) nextReqID() uint64 {
