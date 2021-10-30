@@ -253,9 +253,9 @@ func (net *Hermes) newSendCmd(from, to ReceiverID, payload interface{}) (*sendMs
 }
 
 func (net *Hermes) newRequestCmd(from, to ReceiverID, payload interface{}) (*sendMsgCmd, error) {
-	//if from == "" {
-	//	return nil, ErrInvalidMsgFrom
-	//}
+	if from == "" {
+		return nil, ErrInvalidMsgFrom
+	}
 
 	cmd, err := net.newSendCmd(from, to, payload)
 	if err != nil {
