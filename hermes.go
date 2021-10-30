@@ -333,7 +333,7 @@ func (net *Hermes) newLeaveCmd(id ReceiverID) (*leaveCmd, error) {
 type Hermes struct {
 	reqID      uint64
 	factory    ReceiverFactory
-	reqs       *SyncMap
+	reqs       map[string]chan Message
 	ctx        map[string]*context
 	idleTimers map[string]*time.Timer
 	seed       maphash.Seed
@@ -347,9 +347,9 @@ func New(rf ReceiverFactory) (*Hermes, error) {
 	}
 
 	net := &Hermes{
-		reqs:       NewSyncMap(),
 		factory:    rf,
 		seed:       maphash.MakeSeed(),
+		reqs:       make(map[string]chan Message),
 		ctx:        make(map[string]*context),
 		idleTimers: make(map[string]*time.Timer),
 	}
@@ -490,19 +490,18 @@ func (net *Hermes) onSend(sendType int, msg *message) error {
 
 	switch sendType {
 	case SendReply:
-		ri, ok := net.reqs.Get(msg.corID)
+		replyCh, ok := net.reqs[msg.corID]
 		if !ok {
 			return errors.New("invalid_cor-id")
 		}
-		net.reqs.Delete(msg.corID)
+		delete(net.reqs, msg.corID)
 
-		replyCh := ri.(chan Message)
 		replyCh <- msg
 
 		return nil
 
 	case SendRequest:
-		err := net.reqs.Put(msg.corID, msg.replyCh, false)
+		net.reqs[msg.corID] = msg.replyCh
 		if err != nil {
 			return err
 		}

@@ -18,9 +18,6 @@ type SendPingRequest struct {
 	to      ReceiverID
 	replyCh chan error
 }
-type SendPingResponse struct {
-	err error
-}
 
 type Ping struct{}
 
