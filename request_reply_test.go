@@ -33,12 +33,15 @@ func IOTDeviceID(id string) ReceiverID {
 
 type IOTDeviceGroupAddRequest struct {
 	deviceID ReceiverID
+	replyCh  chan *IOTDeviceGroupAddResponse
 }
 type IOTDeviceGroupAddResponse struct {
 	err error
 }
 
-type IOTDeviceGroupMeasureRequest struct{}
+type IOTDeviceGroupMeasureRequest struct {
+	replyCh chan *IOTDeviceGroupMeasureResponse
+}
 type IOTDeviceGroupMeasureResponse struct {
 	values []float32
 	err    error
@@ -56,8 +59,8 @@ func newIOTDeviceGroup() *IOTDeviceGroup {
 	return &IOTDeviceGroup{devices: make(map[ReceiverID]bool)}
 }
 
-func (grp *IOTDeviceGroup) receive(ctx Context, msg Message) {
-	switch msg.Payload().(type) {
+func (grp *IOTDeviceGroup) receive(ctx Context, mi Message) {
+	switch msg := mi.Payload().(type) {
 	case *IOTDeviceGroupAddRequest:
 		grp.onAddDevice(ctx, msg)
 
@@ -66,27 +69,27 @@ func (grp *IOTDeviceGroup) receive(ctx Context, msg Message) {
 	}
 }
 
-func (grp *IOTDeviceGroup) onAddDevice(ctx Context, msg Message) {
-	id := msg.Payload().(*IOTDeviceGroupAddRequest).deviceID
+func (grp *IOTDeviceGroup) onAddDevice(ctx Context, req *IOTDeviceGroupAddRequest) {
+	id := req.deviceID
 
 	if id == "" {
-		ctx.Reply(msg, &IOTDeviceGroupAddResponse{err: errors.New("invalid_device_id")})
+		req.replyCh <- &IOTDeviceGroupAddResponse{err: errors.New("invalid_device_id")}
 		return
 	}
 
 	grp.devices[id] = true
 
-	ctx.Reply(msg, &IOTDeviceGroupAddResponse{})
+	req.replyCh <- &IOTDeviceGroupAddResponse{}
 }
 
-func (grp *IOTDeviceGroup) onMeasure(ctx Context, msg Message) {
+func (grp *IOTDeviceGroup) onMeasure(ctx Context, req *IOTDeviceGroupMeasureRequest) {
 	values := make([]float32, 0, len(grp.devices))
 	reqChs := make([]chan Message, 0, len(grp.devices))
 
 	for id := range grp.devices {
 		reqCh, err := ctx.Request(id, &IOTDeviceMeasureRequest{})
 		if err != nil {
-			ctx.Reply(msg, &IOTDeviceGroupMeasureResponse{err: err})
+			req.replyCh <- &IOTDeviceGroupMeasureResponse{err: err}
 			return
 		}
 
@@ -98,19 +101,19 @@ func (grp *IOTDeviceGroup) onMeasure(ctx Context, msg Message) {
 		case reply := <-reqCh:
 			dmr, ok := reply.Payload().(*IOTDeviceMeasureResponse)
 			if !ok {
-				ctx.Reply(msg, &IOTDeviceGroupMeasureResponse{err: errors.New("invalid_device_reply")})
+				req.replyCh <- &IOTDeviceGroupMeasureResponse{err: errors.New("invalid_device_reply")}
 				return
 			}
 
 			values = append(values, dmr.value)
 
 		case <-time.After(100 * time.Millisecond):
-			ctx.Reply(msg, &IOTDeviceGroupMeasureResponse{err: errors.New("request_timeout")})
+			req.replyCh <- &IOTDeviceGroupMeasureResponse{err: errors.New("request_timeout")}
 			return
 		}
 	}
 
-	ctx.Reply(msg, &IOTDeviceGroupMeasureResponse{values: values, err: nil})
+	req.replyCh <- &IOTDeviceGroupMeasureResponse{values: values, err: nil}
 }
 
 const (
@@ -153,12 +156,13 @@ func addDevices(net *Hermes, grp ReceiverID, deviceCount int) error {
 	for di := 0; di < deviceCount; di++ {
 		id := IOTDeviceID(fmt.Sprintf("d%d", di))
 
-		m, err := net.RequestWithTimeout("", grp, &IOTDeviceGroupAddRequest{deviceID: id}, 100*time.Millisecond)
+		replyCh := make(chan *IOTDeviceGroupAddResponse, 1)
+		err := net.Send("", grp, &IOTDeviceGroupAddRequest{deviceID: id, replyCh: replyCh})
 		if err != nil {
 			return err
 		}
 
-		res := m.Payload().(*IOTDeviceGroupAddResponse)
+		res := <-replyCh
 		if res.err != nil {
 			return res.err
 		}
@@ -168,18 +172,15 @@ func addDevices(net *Hermes, grp ReceiverID, deviceCount int) error {
 }
 
 func measure(net *Hermes, grp ReceiverID, deviceCount int) error {
-	res, err := net.RequestWithTimeout("", grp, &IOTDeviceGroupMeasureRequest{}, 1000*time.Millisecond)
+	replyCh := make(chan *IOTDeviceGroupMeasureResponse)
+	err := net.Send("", grp, &IOTDeviceGroupMeasureRequest{replyCh: replyCh})
 	if err != nil {
 		return err
 	}
 
-	gmr, ok := res.Payload().(*IOTDeviceGroupMeasureResponse)
-	if !ok {
-		return errors.New("received invalid response from device group")
-	}
-
-	if len(gmr.values) != deviceCount {
-		return fmt.Errorf("expected %d values but got %d\n", deviceCount, len(gmr.values))
+	rep := <-replyCh
+	if len(rep.values) != deviceCount {
+		return fmt.Errorf("expected %d values but got %d\n", deviceCount, len(rep.values))
 	}
 
 	return nil

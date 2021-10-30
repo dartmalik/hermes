@@ -16,13 +16,14 @@ func main() {
 		return
 	}
 
-	ri, err := net.RequestWithTimeout("", mqtt.LWTID(), &mqtt.LWTJoinRequest{}, 1500*time.Millisecond)
+	lwtReplyCh := make(chan *mqtt.LWTJoinReply)
+	err = net.Send("", mqtt.LWTID(), &mqtt.LWTJoinRequest{ReplyCh: lwtReplyCh})
 	if err != nil {
 		fmt.Printf("[FATAL] failed to register LWT module: %s\n", err.Error())
 		return
 	}
 
-	rep := ri.Payload().(*mqtt.LWTJoinReply)
+	rep := <-lwtReplyCh
 	if rep.Err != nil {
 		fmt.Printf("[FATAL] failed to register LWT module: %s\n", rep.Err.Error())
 		return

@@ -15,7 +15,9 @@ func LWTID() hermes.ReceiverID {
 	return hermes.ReceiverID("/ext/lwt")
 }
 
-type LWTJoinRequest struct{}
+type LWTJoinRequest struct {
+	ReplyCh chan *LWTJoinReply
+}
 type LWTJoinReply struct {
 	Err error
 }
@@ -38,7 +40,7 @@ func (lwt *LWT) recv(ctx hermes.Context, hm hermes.Message) {
 
 	case *LWTJoinRequest:
 		err := lwt.onJoin(ctx)
-		ctx.Reply(hm, &LWTJoinReply{Err: err})
+		msg.ReplyCh <- &LWTJoinReply{Err: err}
 
 	case *ConnectMessage:
 		lwt.onConnect(msg)

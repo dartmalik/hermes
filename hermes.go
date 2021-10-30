@@ -142,11 +142,11 @@ func (ctx *context) Send(to ReceiverID, payload interface{}) error {
 }
 
 func (ctx *context) Request(to ReceiverID, request interface{}) (chan Message, error) {
-	return ctx.net.Request(ctx.id, to, request)
+	return ctx.net.request(ctx.id, to, request)
 }
 
 func (ctx *context) RequestWithTimeout(to ReceiverID, request interface{}, timeout time.Duration) (Message, error) {
-	return ctx.net.RequestWithTimeout(ctx.id, to, request, timeout)
+	return ctx.net.requestWithTimeout(ctx.id, to, request, timeout)
 }
 
 func (ctx *context) Reply(mi Message, reply interface{}) error {
@@ -268,6 +268,22 @@ func (net *Hermes) newRequestCmd(from, to ReceiverID, payload interface{}) (*sen
 	return cmd, nil
 }
 
+func (net *Hermes) newReplyCmd(req Message, reply interface{}) (*sendMsgCmd, error) {
+	rm, ok := req.(*message)
+	if !ok {
+		return nil, ErrContextInvalidMessage
+	}
+
+	cmd, err := net.newSendCmd(rm.to, rm.from, reply)
+	if err != nil {
+		return nil, err
+	}
+
+	cmd.corID = rm.corID
+
+	return cmd, nil
+}
+
 func (net *Hermes) newLeaveCmd(id ReceiverID) (*leaveCmd, error) {
 	if id == "" {
 		return nil, ErrInvalidRecvID
@@ -383,9 +399,9 @@ func (net *Hermes) Send(from ReceiverID, to ReceiverID, payload interface{}) err
 	return nil
 }
 
-// Request implements a Request-Reply pattern by exchaning messages between the sender and receiver
+// request implements a request-Reply pattern by exchaning messages between the sender and receiver
 // The returned channel can be used to wait on the reply.
-func (net *Hermes) Request(from, to ReceiverID, request interface{}) (chan Message, error) {
+func (net *Hermes) request(from, to ReceiverID, request interface{}) (chan Message, error) {
 	if net.isClosed() {
 		return nil, ErrInstanceClosed
 	}
@@ -403,14 +419,14 @@ func (net *Hermes) Request(from, to ReceiverID, request interface{}) (chan Messa
 	return cmd.replyCh, nil
 }
 
-// RequestWithTimeout wraps the Request function and waits on the reply channel for the specified
+// requestWithTimeout wraps the Request function and waits on the reply channel for the specified
 // time. This is helpful in production to avoid being deadlocked. Sending a large timeout is equivalent
 // to wating on a blocking channel.
-func (net *Hermes) RequestWithTimeout(
+func (net *Hermes) requestWithTimeout(
 	from, to ReceiverID,
 	request interface{},
 	timeout time.Duration) (Message, error) {
-	replyCh, err := net.Request(from, to, request)
+	replyCh, err := net.request(from, to, request)
 	if err != nil {
 		return nil, err
 	}
@@ -424,21 +440,13 @@ func (net *Hermes) RequestWithTimeout(
 	}
 }
 
-func (net *Hermes) reply(msg Message, reply interface{}) error {
-	im, ok := msg.(*message)
-	if !ok {
-		return errors.New("invalid_message")
+func (net *Hermes) reply(mi Message, reply interface{}) error {
+	cmd, err := net.newReplyCmd(mi, reply)
+	if err != nil {
+		return err
 	}
 
-	req, ok := net.reqs.Get(im.corID)
-	if !ok {
-		return errors.New("invalid_cor-id")
-	}
-
-	rm := req.(*message)
-	rm.replyCh <- &message{from: im.to, to: im.from, corID: im.corID, payload: reply}
-
-	return nil
+	return net.localSend(cmd)
 }
 
 func (net *Hermes) localSend(cmd *sendMsgCmd) error {
@@ -453,7 +461,7 @@ func (net *Hermes) localSend(cmd *sendMsgCmd) error {
 func (net *Hermes) onCmd(ci interface{}) {
 	switch cmd := ci.(type) {
 	case *sendMsgCmd:
-		cmd.cmdReplyCh <- net.onSend(cmd)
+		cmd.cmdReplyCh <- net.onSend(cmd.sendType(), &cmd.message)
 
 	case *leaveCmd:
 		net.onIdleReceiver(cmd.id)
@@ -471,8 +479,7 @@ func (net *Hermes) onIdleReceiver(id ReceiverID) {
 	}
 }
 
-func (net *Hermes) onSend(cmd *sendMsgCmd) error {
-	msg := &cmd.message
+func (net *Hermes) onSend(sendType int, msg *message) error {
 	ctx, err := net.context(msg.to)
 	if err != nil {
 		return err
@@ -481,10 +488,21 @@ func (net *Hermes) onSend(cmd *sendMsgCmd) error {
 	tm := net.idleTimers[string(msg.to)]
 	tm.Reset(RouterIdleTimeout)
 
-	t := cmd.sendType()
-	switch t {
+	switch sendType {
+	case SendReply:
+		ri, ok := net.reqs.Get(msg.corID)
+		if !ok {
+			return errors.New("invalid_cor-id")
+		}
+		net.reqs.Delete(msg.corID)
+
+		replyCh := ri.(chan Message)
+		replyCh <- msg
+
+		return nil
+
 	case SendRequest:
-		err := net.reqs.Put(cmd.corID, msg, false)
+		err := net.reqs.Put(msg.corID, msg.replyCh, false)
 		if err != nil {
 			return err
 		}
