@@ -161,11 +161,14 @@ func BenchmarkSends(b *testing.B) {
 }
 
 func BenchmarkCreationAndSends(b *testing.B) {
+	var mnum uint32 = 0
+
 	rcv := func(ctx Context, hm Message) {
 		switch msg := hm.Payload().(type) {
 		case *Joined:
 
 		case *SendPingRequest:
+			atomic.AddUint32(&mnum, 1)
 
 		default:
 			fmt.Printf("received invalid message: %T\n", msg)
@@ -190,6 +193,12 @@ func BenchmarkCreationAndSends(b *testing.B) {
 	})
 
 	Close(&net)
+
+	for atomic.LoadUint32(&mnum) != uint32(b.N) {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	fmt.Printf("runs: %d\n", atomic.LoadUint32(&mnum))
 }
 
 func BenchmarkRequests(b *testing.B) {

@@ -30,7 +30,7 @@ type String struct {
 	val string
 }
 
-func BenchmarkMPSCAddRemove(b *testing.B) {
+func BenchmarkQueueSingle(b *testing.B) {
 	fmt.Printf("benchmark with runs: %d\n", b.N)
 
 	q := NewSegmentedQueue(10_000)
@@ -55,5 +55,19 @@ func BenchmarkMPSCAddRemove(b *testing.B) {
 	})
 
 	for int(atomic.LoadInt32(&num)) != b.N {
+	}
+}
+
+func BenchmarkQueueMultiple(b *testing.B) {
+	fmt.Printf("benchmark with runs: %d\n", b.N)
+
+	v := &String{val: "m1"}
+	for ri := 0; ri < b.N; ri++ {
+		q := NewSegmentedQueue(64)
+		if q == nil {
+			b.Fatal("failed to create queue")
+		}
+
+		q.Add(v)
 	}
 }
