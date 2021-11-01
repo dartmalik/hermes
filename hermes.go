@@ -2,7 +2,6 @@ package hermes
 
 import (
 	"errors"
-	"fmt"
 	"hash/maphash"
 	"strconv"
 	"sync"
@@ -275,89 +274,6 @@ var (
 	ErrInvalidRecvID     = errors.New("invalid_recv_id")
 )
 
-type sendMsgCmd struct {
-	message
-	cmdReplyCh chan error
-}
-
-type leaveCmd struct {
-	id ReceiverID
-}
-
-func (cmd *sendMsgCmd) sendType() int {
-	if cmd.corID != "" {
-		if cmd.replyCh != nil {
-			return SendRequest
-		} else {
-			return SendReply
-		}
-	}
-
-	return SendMsg
-}
-
-func (net *Hermes) newSendCmd(from, to ReceiverID, payload interface{}) (*sendMsgCmd, error) {
-	if to == "" {
-		return nil, ErrInvalidMsgTo
-	}
-	if payload == nil {
-		return nil, ErrInvalidMsgPayload
-	}
-
-	return &sendMsgCmd{
-		message: message{
-			from:    from,
-			to:      to,
-			payload: payload,
-		},
-		cmdReplyCh: make(chan error, 1),
-	}, nil
-}
-
-func (net *Hermes) newRequestCmd(from, to ReceiverID, payload interface{}, corID string) (*sendMsgCmd, error) {
-	if from == "" {
-		return nil, ErrInvalidMsgFrom
-	}
-	if corID == "" {
-		return nil, errors.New("inalid_cor_id")
-	}
-
-	cmd, err := net.newSendCmd(from, to, payload)
-	if err != nil {
-		return nil, err
-	}
-
-	cmd.replyTo = from
-	cmd.corID = corID //fmt.Sprintf("%d", net.nextReqID())
-	//cmd.replyCh = make(chan Message, 1)
-
-	return cmd, nil
-}
-
-func (net *Hermes) newReplyCmd(req Message, reply interface{}) (*sendMsgCmd, error) {
-	rm, ok := req.(*message)
-	if !ok {
-		return nil, ErrContextInvalidMessage
-	}
-
-	cmd, err := net.newSendCmd(rm.to, rm.from, reply)
-	if err != nil {
-		return nil, err
-	}
-
-	cmd.corID = rm.corID
-
-	return cmd, nil
-}
-
-func (net *Hermes) newLeaveCmd(id ReceiverID) (*leaveCmd, error) {
-	if id == "" {
-		return nil, ErrInvalidRecvID
-	}
-
-	return &leaveCmd{id: id}, nil
-}
-
 // Hermes is an overlay network that routes messages between senders and receivers.
 //
 // Concepts
@@ -398,10 +314,10 @@ func (net *Hermes) newLeaveCmd(id ReceiverID) (*leaveCmd, error) {
 //
 type Hermes struct {
 	factory    ReceiverFactory
+	shs        []*Scheduler
 	ctx        map[string]*context
 	idleTimers map[string]*time.Timer
 	seed       maphash.Seed
-	cmds       *Mailbox
 	closed     uint32
 }
 
@@ -417,11 +333,16 @@ func New(rf ReceiverFactory) (*Hermes, error) {
 		idleTimers: make(map[string]*time.Timer),
 	}
 
-	cmds, err := newMailbox(1024, net.onCmd)
-	if err != nil {
-		return nil, err
+	numSh := 16
+	shs := make([]*Scheduler, numSh)
+	for si := 0; si < numSh; si++ {
+		sh, err := newScheduler(0, net, rf)
+		if err != nil {
+			return nil, err
+		}
+		shs[si] = sh
 	}
-	net.cmds = cmds
+	net.shs = shs
 
 	return net, nil
 }
@@ -443,23 +364,24 @@ func Close(npp **Hermes) error {
 	return nil
 }
 
+func (net *Hermes) sh(to ReceiverID) *Scheduler {
+	var h maphash.Hash
+
+	h.SetSeed(net.seed)
+	h.WriteString(string(to))
+
+	id := int(h.Sum64() % uint64(len(net.shs)))
+
+	return net.shs[id]
+}
+
 // Send sends the specified message payload to the specified receiver
 func (net *Hermes) Send(from ReceiverID, to ReceiverID, payload interface{}) error {
 	if net.isClosed() {
 		return ErrInstanceClosed
 	}
 
-	cmd, err := net.newSendCmd(from, to, payload)
-	if err != nil {
-		return err
-	}
-
-	err = net.localSend(cmd)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return net.sh(to).send(from, to, payload)
 }
 
 // request implements a request-Reply pattern by exchaning messages between the sender and receiver
@@ -469,130 +391,13 @@ func (net *Hermes) request(from, to ReceiverID, payload interface{}, corID strin
 		return ErrInstanceClosed
 	}
 
-	cmd, err := net.newRequestCmd(from, to, payload, corID)
-	if err != nil {
-		return err
-	}
-
-	err = net.localSend(cmd)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return net.sh(to).request(from, to, payload, corID)
 }
 
-func (net *Hermes) reply(mi Message, reply interface{}) error {
-	cmd, err := net.newReplyCmd(mi, reply)
-	if err != nil {
-		return err
-	}
+func (net *Hermes) reply(req Message, reply interface{}) error {
+	rm := req.(*message)
 
-	return net.localSend(cmd)
-}
-
-func (net *Hermes) localSend(cmd *sendMsgCmd) error {
-	err := net.cmds.post(cmd)
-	if err != nil {
-		return err
-	}
-
-	return <-cmd.cmdReplyCh
-}
-
-func (net *Hermes) onCmd(ci interface{}) {
-	switch cmd := ci.(type) {
-	case *sendMsgCmd:
-		cmd.cmdReplyCh <- net.onSend(cmd.sendType(), &cmd.message)
-
-	case *leaveCmd:
-		net.onIdleReceiver(cmd.id)
-	}
-}
-
-func (net *Hermes) onIdleReceiver(id ReceiverID) {
-	ctx, ok := net.ctx[string(id)]
-	if !ok {
-		return
-	}
-
-	if ctx.stop() {
-		delete(net.ctx, string(id))
-	}
-}
-
-func (net *Hermes) onSend(sendType int, msg *message) error {
-	ctx, err := net.context(msg.to)
-	if err != nil {
-		return err
-	}
-
-	tm := net.idleTimers[string(msg.to)]
-	tm.Reset(RouterIdleTimeout)
-
-	return ctx.submit(msg)
-
-	/*
-		switch sendType {
-		case SendReply:
-			replyCh, ok := net.reqs[msg.corID]
-			if !ok {
-				return errors.New("invalid_cor-id")
-			}
-			delete(net.reqs, msg.corID)
-
-			replyCh <- msg
-
-			return nil
-
-		case SendRequest:
-			net.reqs[msg.corID] = msg.replyCh
-			if err != nil {
-				return err
-			}
-			fallthrough
-
-		default:
-			return ctx.submit(msg)
-		}
-	*/
-}
-
-func (net *Hermes) context(id ReceiverID) (*context, error) {
-	ctx, ok := net.ctx[string(id)]
-	if ok {
-		return ctx, nil
-	}
-
-	recv, err := net.factory(id)
-	if err != nil {
-		return nil, err
-	}
-
-	ctx, err = newContext(id, net, recv)
-	if err != nil {
-		return nil, err
-	}
-
-	net.ctx[string(id)] = ctx
-	ctx.submit(&message{to: ctx.id, payload: &Joined{}})
-
-	t := time.AfterFunc(RouterIdleTimeout, func() {
-		net.onIdleTimeout(ctx)
-	})
-	net.idleTimers[string(id)] = t
-
-	return ctx, nil
-}
-
-func (net *Hermes) onIdleTimeout(ctx *context) {
-	cmd, err := net.newLeaveCmd(ctx.ID())
-	if err != nil {
-		fmt.Printf("[ERROR] received idle timeout for invalid receiver")
-		return
-	}
-
-	net.cmds.post(cmd)
+	return net.sh(rm.from).reply(req, reply)
 }
 
 func (net *Hermes) isClosed() bool {
