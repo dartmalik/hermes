@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"hash/maphash"
+	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -105,6 +107,10 @@ type context struct {
 	net     *Hermes
 	recv    Receiver
 	mailbox *Mailbox
+
+	reqsLock sync.Mutex
+	curReqID int
+	reqs     map[string]chan Message
 }
 
 func newContext(id ReceiverID, net *Hermes, recv Receiver) (*context, error) {
@@ -118,7 +124,7 @@ func newContext(id ReceiverID, net *Hermes, recv Receiver) (*context, error) {
 		return nil, errors.New("invalid_receiver")
 	}
 
-	ctx := &context{id: id, net: net, recv: recv}
+	ctx := &context{id: id, net: net, recv: recv, reqs: make(map[string]chan Message)}
 
 	mb, err := newMailbox(64, ctx.onProcess)
 	if err != nil {
@@ -141,12 +147,31 @@ func (ctx *context) Send(to ReceiverID, payload interface{}) error {
 	return ctx.net.Send(ctx.id, to, payload)
 }
 
-func (ctx *context) Request(to ReceiverID, request interface{}) (chan Message, error) {
-	return ctx.net.request(ctx.id, to, request)
+func (ctx *context) Request(to ReceiverID, payload interface{}) (chan Message, error) {
+	cid, replyCh := ctx.newReq()
+
+	err := ctx.net.request(ctx.id, to, payload, cid)
+	if err != nil {
+		ctx.deleteReq(cid)
+		return nil, err
+	}
+
+	return replyCh, nil
 }
 
-func (ctx *context) RequestWithTimeout(to ReceiverID, request interface{}, timeout time.Duration) (Message, error) {
-	return ctx.net.requestWithTimeout(ctx.id, to, request, timeout)
+func (ctx *context) RequestWithTimeout(to ReceiverID, payload interface{}, timeout time.Duration) (Message, error) {
+	replyCh, err := ctx.Request(to, payload)
+	if err != nil {
+		return nil, err
+	}
+
+	select {
+	case reply := <-replyCh:
+		return reply, nil
+
+	case <-time.After(timeout):
+		return nil, errors.New("request_timeout")
+	}
 }
 
 func (ctx *context) Reply(mi Message, reply interface{}) error {
@@ -178,8 +203,44 @@ func (ctx *context) onProcess(msg interface{}) {
 	ctx.recv(ctx, msg.(Message))
 }
 
-func (ctx *context) submit(msg Message) error {
-	return ctx.mailbox.post(msg)
+func (ctx *context) submit(mi Message) error {
+	msg := mi.(*message)
+	if msg.replyTo != ctx.id {
+		replyCh := ctx.deleteReq(msg.corID)
+		if replyCh != nil {
+			replyCh <- mi
+			return nil
+		}
+	}
+
+	return ctx.mailbox.post(mi)
+}
+
+func (ctx *context) newReq() (string, chan Message) {
+	ctx.reqsLock.Lock()
+	defer ctx.reqsLock.Unlock()
+
+	ctx.curReqID++
+	rid := ctx.curReqID
+
+	cid := strconv.Itoa(rid)
+	replyCh := make(chan Message, 1)
+	ctx.reqs[cid] = replyCh
+
+	return cid, replyCh
+}
+
+func (ctx *context) deleteReq(cid string) chan Message {
+	ctx.reqsLock.Lock()
+	defer ctx.reqsLock.Unlock()
+
+	ch, ok := ctx.reqs[cid]
+	if !ok {
+		return nil
+	}
+	delete(ctx.reqs, cid)
+
+	return ch
 }
 
 type Joined struct{}
@@ -192,6 +253,7 @@ type message struct {
 	from    ReceiverID
 	to      ReceiverID
 	corID   string
+	replyTo ReceiverID
 	payload interface{}
 	replyCh chan Message
 }
@@ -252,9 +314,12 @@ func (net *Hermes) newSendCmd(from, to ReceiverID, payload interface{}) (*sendMs
 	}, nil
 }
 
-func (net *Hermes) newRequestCmd(from, to ReceiverID, payload interface{}) (*sendMsgCmd, error) {
+func (net *Hermes) newRequestCmd(from, to ReceiverID, payload interface{}, corID string) (*sendMsgCmd, error) {
 	if from == "" {
 		return nil, ErrInvalidMsgFrom
+	}
+	if corID == "" {
+		return nil, errors.New("inalid_cor_id")
 	}
 
 	cmd, err := net.newSendCmd(from, to, payload)
@@ -262,8 +327,9 @@ func (net *Hermes) newRequestCmd(from, to ReceiverID, payload interface{}) (*sen
 		return nil, err
 	}
 
-	cmd.corID = fmt.Sprintf("%d", net.nextReqID())
-	cmd.replyCh = make(chan Message, 1)
+	cmd.replyTo = from
+	cmd.corID = corID //fmt.Sprintf("%d", net.nextReqID())
+	//cmd.replyCh = make(chan Message, 1)
 
 	return cmd, nil
 }
@@ -331,9 +397,7 @@ func (net *Hermes) newLeaveCmd(id ReceiverID) (*leaveCmd, error) {
 // * (planned) Supports a single abstraction for support both concurrent and distributed applications.
 //
 type Hermes struct {
-	reqID      uint64
 	factory    ReceiverFactory
-	reqs       map[string]chan Message
 	ctx        map[string]*context
 	idleTimers map[string]*time.Timer
 	seed       maphash.Seed
@@ -349,7 +413,6 @@ func New(rf ReceiverFactory) (*Hermes, error) {
 	net := &Hermes{
 		factory:    rf,
 		seed:       maphash.MakeSeed(),
-		reqs:       make(map[string]chan Message),
 		ctx:        make(map[string]*context),
 		idleTimers: make(map[string]*time.Timer),
 	}
@@ -401,43 +464,22 @@ func (net *Hermes) Send(from ReceiverID, to ReceiverID, payload interface{}) err
 
 // request implements a request-Reply pattern by exchaning messages between the sender and receiver
 // The returned channel can be used to wait on the reply.
-func (net *Hermes) request(from, to ReceiverID, request interface{}) (chan Message, error) {
+func (net *Hermes) request(from, to ReceiverID, payload interface{}, corID string) error {
 	if net.isClosed() {
-		return nil, ErrInstanceClosed
+		return ErrInstanceClosed
 	}
 
-	cmd, err := net.newRequestCmd(from, to, request)
+	cmd, err := net.newRequestCmd(from, to, payload, corID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	err = net.localSend(cmd)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return cmd.replyCh, nil
-}
-
-// requestWithTimeout wraps the Request function and waits on the reply channel for the specified
-// time. This is helpful in production to avoid being deadlocked. Sending a large timeout is equivalent
-// to wating on a blocking channel.
-func (net *Hermes) requestWithTimeout(
-	from, to ReceiverID,
-	request interface{},
-	timeout time.Duration) (Message, error) {
-	replyCh, err := net.request(from, to, request)
-	if err != nil {
-		return nil, err
-	}
-
-	select {
-	case reply := <-replyCh:
-		return reply, nil
-
-	case <-time.After(timeout):
-		return nil, errors.New("request_timeout")
-	}
+	return nil
 }
 
 func (net *Hermes) reply(mi Message, reply interface{}) error {
@@ -488,28 +530,32 @@ func (net *Hermes) onSend(sendType int, msg *message) error {
 	tm := net.idleTimers[string(msg.to)]
 	tm.Reset(RouterIdleTimeout)
 
-	switch sendType {
-	case SendReply:
-		replyCh, ok := net.reqs[msg.corID]
-		if !ok {
-			return errors.New("invalid_cor-id")
+	return ctx.submit(msg)
+
+	/*
+		switch sendType {
+		case SendReply:
+			replyCh, ok := net.reqs[msg.corID]
+			if !ok {
+				return errors.New("invalid_cor-id")
+			}
+			delete(net.reqs, msg.corID)
+
+			replyCh <- msg
+
+			return nil
+
+		case SendRequest:
+			net.reqs[msg.corID] = msg.replyCh
+			if err != nil {
+				return err
+			}
+			fallthrough
+
+		default:
+			return ctx.submit(msg)
 		}
-		delete(net.reqs, msg.corID)
-
-		replyCh <- msg
-
-		return nil
-
-	case SendRequest:
-		net.reqs[msg.corID] = msg.replyCh
-		if err != nil {
-			return err
-		}
-		fallthrough
-
-	default:
-		return ctx.submit(msg)
-	}
+	*/
 }
 
 func (net *Hermes) context(id ReceiverID) (*context, error) {
@@ -547,10 +593,6 @@ func (net *Hermes) onIdleTimeout(ctx *context) {
 	}
 
 	net.cmds.post(cmd)
-}
-
-func (net *Hermes) nextReqID() uint64 {
-	return atomic.AddUint64(&net.reqID, 1)
 }
 
 func (net *Hermes) isClosed() bool {
