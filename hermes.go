@@ -3,6 +3,7 @@ package hermes
 import (
 	"errors"
 	"hash/maphash"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -312,7 +313,6 @@ var (
 // * (planned) Supports a single abstraction for support both concurrent and distributed applications.
 //
 type Hermes struct {
-	factory    ReceiverFactory
 	shs        []*Scheduler
 	ctx        map[string]*context
 	idleTimers map[string]*time.Timer
@@ -326,13 +326,12 @@ func New(rf ReceiverFactory) (*Hermes, error) {
 	}
 
 	net := &Hermes{
-		factory:    rf,
 		seed:       maphash.MakeSeed(),
 		ctx:        make(map[string]*context),
 		idleTimers: make(map[string]*time.Timer),
 	}
 
-	numSh := 16
+	numSh := runtime.NumCPU() * 2
 	shs := make([]*Scheduler, numSh)
 	for si := 0; si < numSh; si++ {
 		sh, err := newScheduler(0, net, rf)
@@ -363,17 +362,6 @@ func Close(npp **Hermes) error {
 	return nil
 }
 
-func (net *Hermes) sh(to ReceiverID) *Scheduler {
-	var h maphash.Hash
-
-	h.SetSeed(net.seed)
-	h.WriteString(string(to))
-
-	id := int(h.Sum64() % uint64(len(net.shs)))
-
-	return net.shs[id]
-}
-
 // Send sends the specified message payload to the specified receiver
 func (net *Hermes) Send(from ReceiverID, to ReceiverID, payload interface{}) error {
 	if net.isClosed() {
@@ -401,4 +389,15 @@ func (net *Hermes) reply(req Message, reply interface{}) error {
 
 func (net *Hermes) isClosed() bool {
 	return atomic.LoadUint32(&net.closed) == 1
+}
+
+func (net *Hermes) sh(to ReceiverID) *Scheduler {
+	var h maphash.Hash
+
+	h.SetSeed(net.seed)
+	h.WriteString(string(to))
+
+	id := int(h.Sum64() % uint64(len(net.shs)))
+
+	return net.shs[id]
 }
