@@ -24,6 +24,7 @@ type Scheduler struct {
 	idleTimers map[string]*time.Timer
 	cmds       *Mailbox
 	closed     uint32
+	joined     *message
 }
 
 func newScheduler(id int, net *Hermes, rf ReceiverFactory) (*Scheduler, error) {
@@ -40,6 +41,7 @@ func newScheduler(id int, net *Hermes, rf ReceiverFactory) (*Scheduler, error) {
 		factory:    rf,
 		ctx:        make(map[string]*context),
 		idleTimers: make(map[string]*time.Timer),
+		joined:     &message{payload: &Joined{}},
 	}
 
 	cmds, err := newMailbox(1024, sh.onCmd)
@@ -158,7 +160,7 @@ func (sh *Scheduler) context(id ReceiverID) (*context, error) {
 	}
 
 	sh.ctx[string(id)] = ctx
-	ctx.submit(&message{to: ctx.id, payload: &Joined{}})
+	ctx.submit(sh.joined)
 
 	t := time.AfterFunc(RouterIdleTimeout, func() {
 		sh.onIdleTimeout(ctx)
