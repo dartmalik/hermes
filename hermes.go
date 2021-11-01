@@ -206,7 +206,7 @@ func (ctx *context) onProcess(msg interface{}) {
 func (ctx *context) submit(mi Message) error {
 	msg := mi.(*message)
 	if msg.replyTo != ctx.id {
-		replyCh := ctx.deleteReq(msg.corID)
+		replyCh := ctx.deleteReq(msg.reqID)
 		if replyCh != nil {
 			replyCh <- mi
 			return nil
@@ -252,7 +252,7 @@ type Message interface {
 type message struct {
 	from    ReceiverID
 	to      ReceiverID
-	corID   string
+	reqID   string
 	replyTo ReceiverID
 	payload interface{}
 }
@@ -260,12 +260,6 @@ type message struct {
 func (m *message) Payload() interface{} {
 	return m.payload
 }
-
-const (
-	SendMsg = iota + 1
-	SendRequest
-	SendReply
-)
 
 var (
 	ErrInvalidMsgTo      = errors.New("invalid_msg_to")

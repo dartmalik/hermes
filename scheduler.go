@@ -74,12 +74,12 @@ func (sh *Scheduler) send(from ReceiverID, to ReceiverID, payload interface{}) e
 
 // request implements a request-Reply pattern by exchaning messages between the sender and receiver
 // The returned channel can be used to wait on the reply.
-func (sh *Scheduler) request(from, to ReceiverID, payload interface{}, corID string) error {
+func (sh *Scheduler) request(from, to ReceiverID, payload interface{}, reqID string) error {
 	if sh.isClosed() {
 		return ErrInstanceClosed
 	}
 
-	cmd, err := sh.newRequestCmd(from, to, payload, corID)
+	cmd, err := sh.newRequestCmd(from, to, payload, reqID)
 	if err != nil {
 		return err
 	}
@@ -202,7 +202,7 @@ func (sh *Scheduler) newSendCmd(from, to ReceiverID, payload interface{}) (*send
 	}, nil
 }
 
-func (sh *Scheduler) newRequestCmd(from, to ReceiverID, payload interface{}, corID string) (*sendMsgCmd, error) {
+func (sh *Scheduler) newRequestCmd(from, to ReceiverID, payload interface{}, reqID string) (*sendMsgCmd, error) {
 	if from == "" {
 		return nil, ErrInvalidMsgFrom
 	}
@@ -213,7 +213,7 @@ func (sh *Scheduler) newRequestCmd(from, to ReceiverID, payload interface{}, cor
 	}
 
 	cmd.replyTo = from
-	cmd.corID = corID
+	cmd.reqID = reqID
 
 	return cmd, nil
 }
@@ -229,7 +229,7 @@ func (sh *Scheduler) newReplyCmd(req Message, reply interface{}) (*sendMsgCmd, e
 		return nil, err
 	}
 
-	cmd.corID = rm.corID
+	cmd.reqID = rm.reqID
 
 	return cmd, nil
 }
