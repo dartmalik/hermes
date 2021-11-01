@@ -9,7 +9,7 @@ import (
 
 type sendMsgCmd struct {
 	message
-	cmdReplyCh chan error
+	replyCh chan error
 }
 
 type leaveCmd struct {
@@ -105,13 +105,13 @@ func (sh *Scheduler) localSend(cmd *sendMsgCmd) error {
 		return err
 	}
 
-	return <-cmd.cmdReplyCh
+	return <-cmd.replyCh
 }
 
 func (sh *Scheduler) onCmd(ci interface{}) {
 	switch cmd := ci.(type) {
 	case *sendMsgCmd:
-		cmd.cmdReplyCh <- sh.onSend(&cmd.message)
+		cmd.replyCh <- sh.onSend(&cmd.message)
 
 	case *leaveCmd:
 		sh.onIdleReceiver(cmd.id)
@@ -196,7 +196,7 @@ func (sh *Scheduler) newSendCmd(from, to ReceiverID, payload interface{}) (*send
 			to:      to,
 			payload: payload,
 		},
-		cmdReplyCh: make(chan error, 1),
+		replyCh: make(chan error, 1),
 	}, nil
 }
 

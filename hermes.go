@@ -254,7 +254,6 @@ type message struct {
 	corID   string
 	replyTo ReceiverID
 	payload interface{}
-	replyCh chan Message
 }
 
 func (m *message) Payload() interface{} {
