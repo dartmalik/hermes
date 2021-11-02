@@ -10,7 +10,7 @@ import (
 )
 
 type IOTDeviceMeasureRequest struct{}
-type IOTDeviceMeasureResponse struct {
+type IOTDeviceMeasureReply struct {
 	value float32
 }
 
@@ -19,7 +19,7 @@ type IOTDevice struct{}
 func (device *IOTDevice) receive(ctx Context, msg Message) {
 	switch msg.Payload().(type) {
 	case *IOTDeviceMeasureRequest:
-		ctx.Reply(msg, &IOTDeviceMeasureResponse{value: rand.Float32()})
+		ctx.Reply(msg, &IOTDeviceMeasureReply{value: rand.Float32()})
 	}
 }
 
@@ -33,16 +33,16 @@ func IOTDeviceID(id string) ReceiverID {
 
 type IOTDeviceGroupAddRequest struct {
 	deviceID ReceiverID
-	replyCh  chan *IOTDeviceGroupAddResponse
+	replyCh  chan *IOTDeviceGroupAddReply
 }
-type IOTDeviceGroupAddResponse struct {
+type IOTDeviceGroupAddReply struct {
 	err error
 }
 
 type IOTDeviceGroupMeasureRequest struct {
-	replyCh chan *IOTDeviceGroupMeasureResponse
+	replyCh chan *IOTDeviceGroupMeasureReply
 }
-type IOTDeviceGroupMeasureResponse struct {
+type IOTDeviceGroupMeasureReply struct {
 	values []float32
 	err    error
 }
@@ -73,13 +73,13 @@ func (grp *IOTDeviceGroup) onAddDevice(ctx Context, req *IOTDeviceGroupAddReques
 	id := req.deviceID
 
 	if id == "" {
-		req.replyCh <- &IOTDeviceGroupAddResponse{err: errors.New("invalid_device_id")}
+		req.replyCh <- &IOTDeviceGroupAddReply{err: errors.New("invalid_device_id")}
 		return
 	}
 
 	grp.devices[id] = true
 
-	req.replyCh <- &IOTDeviceGroupAddResponse{}
+	req.replyCh <- &IOTDeviceGroupAddReply{}
 }
 
 func (grp *IOTDeviceGroup) onMeasure(ctx Context, req *IOTDeviceGroupMeasureRequest) {
@@ -89,7 +89,7 @@ func (grp *IOTDeviceGroup) onMeasure(ctx Context, req *IOTDeviceGroupMeasureRequ
 	for id := range grp.devices {
 		reqCh, err := ctx.Request(id, &IOTDeviceMeasureRequest{})
 		if err != nil {
-			req.replyCh <- &IOTDeviceGroupMeasureResponse{err: err}
+			req.replyCh <- &IOTDeviceGroupMeasureReply{err: err}
 			return
 		}
 
@@ -98,22 +98,22 @@ func (grp *IOTDeviceGroup) onMeasure(ctx Context, req *IOTDeviceGroupMeasureRequ
 
 	for _, reqCh := range reqChs {
 		select {
-		case reply := <-reqCh:
-			dmr, ok := reply.Payload().(*IOTDeviceMeasureResponse)
+		case rep := <-reqCh:
+			dmr, ok := rep.Payload().(*IOTDeviceMeasureReply)
 			if !ok {
-				req.replyCh <- &IOTDeviceGroupMeasureResponse{err: errors.New("invalid_device_reply")}
+				req.replyCh <- &IOTDeviceGroupMeasureReply{err: errors.New("invalid_device_reply")}
 				return
 			}
 
 			values = append(values, dmr.value)
 
 		case <-time.After(100 * time.Millisecond):
-			req.replyCh <- &IOTDeviceGroupMeasureResponse{err: errors.New("request_timeout")}
+			req.replyCh <- &IOTDeviceGroupMeasureReply{err: errors.New("request_timeout")}
 			return
 		}
 	}
 
-	req.replyCh <- &IOTDeviceGroupMeasureResponse{values: values, err: nil}
+	req.replyCh <- &IOTDeviceGroupMeasureReply{values: values, err: nil}
 }
 
 const (
@@ -156,7 +156,7 @@ func addDevices(net *Hermes, grp ReceiverID, deviceCount int) error {
 	for di := 0; di < deviceCount; di++ {
 		id := IOTDeviceID(fmt.Sprintf("d%d", di))
 
-		replyCh := make(chan *IOTDeviceGroupAddResponse, 1)
+		replyCh := make(chan *IOTDeviceGroupAddReply, 1)
 		err := net.Send("", grp, &IOTDeviceGroupAddRequest{deviceID: id, replyCh: replyCh})
 		if err != nil {
 			return err
@@ -172,7 +172,7 @@ func addDevices(net *Hermes, grp ReceiverID, deviceCount int) error {
 }
 
 func measure(net *Hermes, grp ReceiverID, deviceCount int) error {
-	replyCh := make(chan *IOTDeviceGroupMeasureResponse)
+	replyCh := make(chan *IOTDeviceGroupMeasureReply)
 	err := net.Send("", grp, &IOTDeviceGroupMeasureRequest{replyCh: replyCh})
 	if err != nil {
 		return err
