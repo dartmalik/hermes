@@ -113,14 +113,28 @@ func (sh *scheduler) localSend(cmd *sendMsgCmd) error {
 func (sh *scheduler) onCmd(ci interface{}) {
 	switch cmd := ci.(type) {
 	case *sendMsgCmd:
-		cmd.replyCh <- sh.onSend(&cmd.message)
+		cmd.replyCh <- sh.onSendMsg(&cmd.message)
 
 	case *leaveCmd:
-		sh.onIdleReceiver(cmd.id)
+		sh.onRemoveRecv(cmd.id)
 	}
 }
 
-func (sh *scheduler) onIdleReceiver(id ReceiverID) {
+func (sh *scheduler) onSendMsg(msg *message) error {
+	ctx, err := sh.context(msg.to)
+	if err != nil {
+		return err
+	}
+
+	if msg.from != "" {
+		sh.resetTimer(msg.from)
+	}
+	sh.resetTimer(msg.to)
+
+	return ctx.submit(msg)
+}
+
+func (sh *scheduler) onRemoveRecv(id ReceiverID) {
 	ctx, ok := sh.ctx[string(id)]
 	if !ok {
 		return
@@ -131,16 +145,19 @@ func (sh *scheduler) onIdleReceiver(id ReceiverID) {
 	}
 }
 
-func (sh *scheduler) onSend(msg *message) error {
-	ctx, err := sh.context(msg.to)
+func (sh *scheduler) onRecvIdle(ctx *context) {
+	cmd, err := sh.newLeaveCmd(ctx.ID())
 	if err != nil {
-		return err
+		fmt.Printf("[ERROR] received idle timeout for invalid receiver")
+		return
 	}
 
-	tm := sh.idleTimers[string(msg.to)]
-	tm.Reset(RouterIdleTimeout)
+	sh.cmds.post(cmd)
+}
 
-	return ctx.submit(msg)
+func (sh *scheduler) resetTimer(id ReceiverID) {
+	tm := sh.idleTimers[string(id)]
+	tm.Reset(RouterIdleTimeout) // note: timer is reset even when expired
 }
 
 func (sh *scheduler) context(id ReceiverID) (*context, error) {
@@ -163,21 +180,11 @@ func (sh *scheduler) context(id ReceiverID) (*context, error) {
 	ctx.submit(sh.joined)
 
 	t := time.AfterFunc(RouterIdleTimeout, func() {
-		sh.onIdleTimeout(ctx)
+		sh.onRecvIdle(ctx)
 	})
 	sh.idleTimers[string(id)] = t
 
 	return ctx, nil
-}
-
-func (sh *scheduler) onIdleTimeout(ctx *context) {
-	cmd, err := sh.newLeaveCmd(ctx.ID())
-	if err != nil {
-		fmt.Printf("[ERROR] received idle timeout for invalid receiver")
-		return
-	}
-
-	sh.cmds.post(cmd)
 }
 
 func (sh *scheduler) isClosed() bool {

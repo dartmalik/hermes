@@ -29,6 +29,20 @@ var (
 
 type MailboxProcessCB func(interface{})
 
+// Mailbox maintains a queue for messages to be consumed by a consumer (process callback).
+// It ensures that only a single consumer is processing the queue at one time by managing
+// the state of the mailbox. The consuming function is called in goroutine.
+// The mailbox methods can be called from multiple goroutines.
+//
+// A mailbox can be in one of three states: idle, processing, stopped.
+// Idle
+// The mailbox is empty and not being processed.
+// Processing
+// The mailbox is not empty and currently the processing goroutine it running. processMsgs
+// is only run while the state is set to processing.
+// Stopped
+// The mailbox is empty and will no longer be processed. A mailbox can only be stopped if
+// it is idle. Stop does not suspend the processing of messages.
 type Mailbox struct {
 	msgs      Queue
 	onProcess MailboxProcessCB
@@ -43,8 +57,16 @@ func newMailbox(segCap int, cb MailboxProcessCB) (*Mailbox, error) {
 	return &Mailbox{msgs: NewSegmentedQueue(segCap), onProcess: cb, state: MailboxIdle}, nil
 }
 
+// stop tries to transition the mailbox to a stopped state
+// returns true if the mailbox state is now stopped
 func (box *Mailbox) stop() bool {
-	return atomic.CompareAndSwapInt32(&box.state, MailboxIdle, MailboxStopped)
+	if atomic.CompareAndSwapInt32(&box.state, MailboxIdle, MailboxStopped) { // flip from idle to stopped
+		return true
+	}
+
+	// if the flip failed, check if the current state is stopped.
+	// will be false if current state if processing
+	return atomic.LoadInt32(&box.state) == MailboxStopped
 }
 
 func (box *Mailbox) post(msg interface{}) error {
@@ -65,15 +87,15 @@ func (box *Mailbox) post(msg interface{}) error {
 }
 
 func (box *Mailbox) process() {
-	box.processMessages()
+	box.processMsgs()
 
 	for !box.msgs.IsEmpty() &&
 		atomic.CompareAndSwapInt32(&box.state, MailboxIdle, MailboxProcessing) {
-		box.processMessages()
+		box.processMsgs()
 	}
 }
 
-func (box *Mailbox) processMessages() {
+func (box *Mailbox) processMsgs() {
 	for e := box.msgs.Peek(); e != nil; {
 		box.onProcess(e.(Message))
 		e = box.msgs.RemoveAndPeek()
