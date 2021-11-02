@@ -16,7 +16,7 @@ type leaveCmd struct {
 	id ReceiverID
 }
 
-type Scheduler struct {
+type scheduler struct {
 	id         int
 	net        *Hermes
 	factory    ReceiverFactory
@@ -27,7 +27,7 @@ type Scheduler struct {
 	joined     *message
 }
 
-func newScheduler(id int, net *Hermes, rf ReceiverFactory) (*Scheduler, error) {
+func newScheduler(id int, net *Hermes, rf ReceiverFactory) (*scheduler, error) {
 	if net == nil {
 		return nil, errors.New("invalid_hermes_instance")
 	}
@@ -35,7 +35,7 @@ func newScheduler(id int, net *Hermes, rf ReceiverFactory) (*Scheduler, error) {
 		return nil, errors.New("invalid_factory")
 	}
 
-	sh := &Scheduler{
+	sh := &scheduler{
 		id:         id,
 		net:        net,
 		factory:    rf,
@@ -54,7 +54,7 @@ func newScheduler(id int, net *Hermes, rf ReceiverFactory) (*Scheduler, error) {
 }
 
 // Send sends the specified message payload to the specified receiver
-func (sh *Scheduler) send(from ReceiverID, to ReceiverID, payload interface{}) error {
+func (sh *scheduler) send(from ReceiverID, to ReceiverID, payload interface{}) error {
 	if sh.isClosed() {
 		return ErrInstanceClosed
 	}
@@ -74,7 +74,7 @@ func (sh *Scheduler) send(from ReceiverID, to ReceiverID, payload interface{}) e
 
 // request implements a request-Reply pattern by exchaning messages between the sender and receiver
 // The returned channel can be used to wait on the reply.
-func (sh *Scheduler) request(from, to ReceiverID, payload interface{}, reqID string) error {
+func (sh *scheduler) request(from, to ReceiverID, payload interface{}, reqID string) error {
 	if sh.isClosed() {
 		return ErrInstanceClosed
 	}
@@ -92,7 +92,7 @@ func (sh *Scheduler) request(from, to ReceiverID, payload interface{}, reqID str
 	return nil
 }
 
-func (sh *Scheduler) reply(mi Message, reply interface{}) error {
+func (sh *scheduler) reply(mi Message, reply interface{}) error {
 	cmd, err := sh.newReplyCmd(mi, reply)
 	if err != nil {
 		return err
@@ -101,7 +101,7 @@ func (sh *Scheduler) reply(mi Message, reply interface{}) error {
 	return sh.localSend(cmd)
 }
 
-func (sh *Scheduler) localSend(cmd *sendMsgCmd) error {
+func (sh *scheduler) localSend(cmd *sendMsgCmd) error {
 	err := sh.cmds.post(cmd)
 	if err != nil {
 		return err
@@ -110,7 +110,7 @@ func (sh *Scheduler) localSend(cmd *sendMsgCmd) error {
 	return <-cmd.replyCh
 }
 
-func (sh *Scheduler) onCmd(ci interface{}) {
+func (sh *scheduler) onCmd(ci interface{}) {
 	switch cmd := ci.(type) {
 	case *sendMsgCmd:
 		cmd.replyCh <- sh.onSend(&cmd.message)
@@ -120,7 +120,7 @@ func (sh *Scheduler) onCmd(ci interface{}) {
 	}
 }
 
-func (sh *Scheduler) onIdleReceiver(id ReceiverID) {
+func (sh *scheduler) onIdleReceiver(id ReceiverID) {
 	ctx, ok := sh.ctx[string(id)]
 	if !ok {
 		return
@@ -131,7 +131,7 @@ func (sh *Scheduler) onIdleReceiver(id ReceiverID) {
 	}
 }
 
-func (sh *Scheduler) onSend(msg *message) error {
+func (sh *scheduler) onSend(msg *message) error {
 	ctx, err := sh.context(msg.to)
 	if err != nil {
 		return err
@@ -143,7 +143,7 @@ func (sh *Scheduler) onSend(msg *message) error {
 	return ctx.submit(msg)
 }
 
-func (sh *Scheduler) context(id ReceiverID) (*context, error) {
+func (sh *scheduler) context(id ReceiverID) (*context, error) {
 	ctx, ok := sh.ctx[string(id)]
 	if ok {
 		return ctx, nil
@@ -170,7 +170,7 @@ func (sh *Scheduler) context(id ReceiverID) (*context, error) {
 	return ctx, nil
 }
 
-func (sh *Scheduler) onIdleTimeout(ctx *context) {
+func (sh *scheduler) onIdleTimeout(ctx *context) {
 	cmd, err := sh.newLeaveCmd(ctx.ID())
 	if err != nil {
 		fmt.Printf("[ERROR] received idle timeout for invalid receiver")
@@ -180,11 +180,11 @@ func (sh *Scheduler) onIdleTimeout(ctx *context) {
 	sh.cmds.post(cmd)
 }
 
-func (sh *Scheduler) isClosed() bool {
+func (sh *scheduler) isClosed() bool {
 	return atomic.LoadUint32(&sh.closed) == 1
 }
 
-func (sh *Scheduler) newSendCmd(from, to ReceiverID, payload interface{}) (*sendMsgCmd, error) {
+func (sh *scheduler) newSendCmd(from, to ReceiverID, payload interface{}) (*sendMsgCmd, error) {
 	if to == "" {
 		return nil, ErrInvalidMsgTo
 	}
@@ -202,7 +202,7 @@ func (sh *Scheduler) newSendCmd(from, to ReceiverID, payload interface{}) (*send
 	}, nil
 }
 
-func (sh *Scheduler) newRequestCmd(from, to ReceiverID, payload interface{}, reqID string) (*sendMsgCmd, error) {
+func (sh *scheduler) newRequestCmd(from, to ReceiverID, payload interface{}, reqID string) (*sendMsgCmd, error) {
 	if from == "" {
 		return nil, ErrInvalidMsgFrom
 	}
@@ -218,7 +218,7 @@ func (sh *Scheduler) newRequestCmd(from, to ReceiverID, payload interface{}, req
 	return cmd, nil
 }
 
-func (sh *Scheduler) newReplyCmd(req Message, reply interface{}) (*sendMsgCmd, error) {
+func (sh *scheduler) newReplyCmd(req Message, reply interface{}) (*sendMsgCmd, error) {
 	rm, ok := req.(*message)
 	if !ok {
 		return nil, ErrContextInvalidMessage
@@ -234,7 +234,7 @@ func (sh *Scheduler) newReplyCmd(req Message, reply interface{}) (*sendMsgCmd, e
 	return cmd, nil
 }
 
-func (sh *Scheduler) newLeaveCmd(id ReceiverID) (*leaveCmd, error) {
+func (sh *scheduler) newLeaveCmd(id ReceiverID) (*leaveCmd, error) {
 	if id == "" {
 		return nil, ErrInvalidRecvID
 	}

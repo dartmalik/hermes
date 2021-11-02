@@ -307,7 +307,7 @@ var (
 // * (planned) Supports a single abstraction for support both concurrent and distributed applications.
 //
 type Hermes struct {
-	shs        []*Scheduler
+	shs        []*scheduler
 	ctx        map[string]*context
 	idleTimers map[string]*time.Timer
 	seed       maphash.Seed
@@ -326,7 +326,7 @@ func New(rf ReceiverFactory) (*Hermes, error) {
 	}
 
 	numSh := runtime.NumCPU() * 2
-	shs := make([]*Scheduler, numSh)
+	shs := make([]*scheduler, numSh)
 	for si := 0; si < numSh; si++ {
 		sh, err := newScheduler(0, net, rf)
 		if err != nil {
@@ -385,7 +385,7 @@ func (net *Hermes) isClosed() bool {
 	return atomic.LoadUint32(&net.closed) == 1
 }
 
-func (net *Hermes) sh(to ReceiverID) *Scheduler {
+func (net *Hermes) sh(to ReceiverID) *scheduler {
 	var h maphash.Hash
 
 	h.SetSeed(net.seed)
