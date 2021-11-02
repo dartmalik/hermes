@@ -124,14 +124,14 @@ func createSession(t *testing.T) *Session {
 func testConsumerRegister(t *testing.T, ctx *TestContext, s *Session, cid hermes.ReceiverID) {
 	replied := false
 	ctx.onReply = func(m hermes.Message, ri interface{}) error {
-		res, ok := ri.(*SessionRegisterReply)
+		rep, ok := ri.(*SessionRegisterReply)
 		if !ok {
 			t.Fatalf("expected message of type SessionRegisterReply")
 		}
-		if cid != "" && res.Err != nil {
-			t.Fatalf("register failed with error: %s\n", res.Err.Error())
+		if cid != "" && rep.Err != nil {
+			t.Fatalf("register failed with error: %s\n", rep.Err.Error())
 		}
-		if cid == "" && res.Err == nil {
+		if cid == "" && rep.Err == nil {
 			t.Fatalf("session should have replied with error")
 		}
 

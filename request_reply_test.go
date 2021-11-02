@@ -162,9 +162,9 @@ func addDevices(net *Hermes, grp ReceiverID, deviceCount int) error {
 			return err
 		}
 
-		res := <-replyCh
-		if res.err != nil {
-			return res.err
+		rep := <-replyCh
+		if rep.err != nil {
+			return rep.err
 		}
 	}
 

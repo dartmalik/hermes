@@ -323,26 +323,26 @@ func (cl *client) onDisconnect() {
 
 func (cl *client) register(ctx hermes.Context, id ClientId) (bool, error) {
 	sid := sessionID(id)
-	res, err := ctx.RequestWithTimeout(sid, &SessionRegisterRequest{ConsumerID: ctx.ID()}, ClientRequestTimeout)
+	ri, err := ctx.RequestWithTimeout(sid, &SessionRegisterRequest{ConsumerID: ctx.ID()}, ClientRequestTimeout)
 	if err != nil {
 		return false, err
 	}
 
-	srr := res.Payload().(*SessionRegisterReply)
+	rep := ri.Payload().(*SessionRegisterReply)
 
-	return srr.present, srr.Err
+	return rep.present, rep.Err
 }
 
 func (cl *client) unregister(ctx hermes.Context, id ClientId) error {
 	sid := sessionID(id)
-	res, err := ctx.RequestWithTimeout(sid, &SessionUnregisterRequest{ConsumerID: ctx.ID()}, ClientRequestTimeout)
+	ri, err := ctx.RequestWithTimeout(sid, &SessionUnregisterRequest{ConsumerID: ctx.ID()}, ClientRequestTimeout)
 	if err != nil {
 		return err
 	}
 
-	srr := res.Payload().(*SessionUnregisterReply)
+	rep := ri.Payload().(*SessionUnregisterReply)
 
-	return srr.Err
+	return rep.Err
 }
 
 func (cl *client) clean(ctx hermes.Context, id ClientId) error {
