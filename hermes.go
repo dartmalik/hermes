@@ -333,7 +333,6 @@ type Hermes struct {
 	ctx        map[string]*context
 	idleTimers map[string]*time.Timer
 	seed       maphash.Seed
-	closed     uint32
 }
 
 func New(rf ReceiverFactory) (*Hermes, error) {
@@ -370,7 +369,10 @@ func Delete(npp **Hermes) error {
 
 	net := *npp
 	for _, sh := range net.shs {
-		sh.stop()
+		err := sh.stop()
+		if err != nil {
+			return err
+		}
 	}
 
 	*npp = nil
@@ -380,20 +382,12 @@ func Delete(npp **Hermes) error {
 
 // Send sends the specified message payload to the specified receiver
 func (net *Hermes) Send(from ReceiverID, to ReceiverID, payload interface{}) error {
-	if net.isClosed() {
-		return ErrInstanceClosed
-	}
-
 	return net.sh(to).send(from, to, payload)
 }
 
 // request implements a request-Reply pattern by exchaning messages between the sender and receiver
 // The returned channel can be used to wait on the reply.
 func (net *Hermes) request(from, to ReceiverID, payload interface{}, corID string) error {
-	if net.isClosed() {
-		return ErrInstanceClosed
-	}
-
 	return net.sh(to).request(from, to, payload, corID)
 }
 
@@ -401,10 +395,6 @@ func (net *Hermes) reply(req Message, reply interface{}) error {
 	rm := req.(*message)
 
 	return net.sh(rm.from).reply(req, reply)
-}
-
-func (net *Hermes) isClosed() bool {
-	return atomic.LoadUint32(&net.closed) == 1
 }
 
 func (net *Hermes) sh(to ReceiverID) *scheduler {
