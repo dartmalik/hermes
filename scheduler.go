@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+var (
+	ErrShStopped = errors.New("scheduler_stopped")
+)
+
 type sendMsgCmd struct {
 	message
 	replyCh chan error
@@ -23,7 +27,7 @@ type scheduler struct {
 	ctx        map[string]*context
 	idleTimers map[string]*time.Timer
 	cmds       *Mailbox
-	closed     uint32
+	stopped    uint32
 	joined     *message
 }
 
@@ -53,12 +57,26 @@ func newScheduler(id int, net *Hermes, rf ReceiverFactory) (*scheduler, error) {
 	return sh, nil
 }
 
-// Send sends the specified message payload to the specified receiver
-func (sh *scheduler) send(from ReceiverID, to ReceiverID, payload interface{}) error {
-	if sh.isClosed() {
-		return ErrInstanceClosed
+func (sh *scheduler) stop() error {
+	if !atomic.CompareAndSwapUint32(&sh.stopped, 0, 1) {
+		return ErrShStopped
 	}
 
+	for !sh.cmds.stop() {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	for _, ctx := range sh.ctx {
+		for !ctx.stop() {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	return nil
+}
+
+// Send sends the specified message payload to the specified receiver
+func (sh *scheduler) send(from ReceiverID, to ReceiverID, payload interface{}) error {
 	cmd, err := sh.newSendCmd(from, to, payload)
 	if err != nil {
 		return err
@@ -75,10 +93,6 @@ func (sh *scheduler) send(from ReceiverID, to ReceiverID, payload interface{}) e
 // request implements a request-Reply pattern by exchaning messages between the sender and receiver
 // The returned channel can be used to wait on the reply.
 func (sh *scheduler) request(from, to ReceiverID, payload interface{}, reqID string) error {
-	if sh.isClosed() {
-		return ErrInstanceClosed
-	}
-
 	cmd, err := sh.newRequestCmd(from, to, payload, reqID)
 	if err != nil {
 		return err
@@ -102,6 +116,10 @@ func (sh *scheduler) reply(mi Message, reply interface{}) error {
 }
 
 func (sh *scheduler) localSend(cmd *sendMsgCmd) error {
+	if sh.isStopped() {
+		return ErrShStopped
+	}
+
 	err := sh.cmds.post(cmd)
 	if err != nil {
 		return err
@@ -126,9 +144,6 @@ func (sh *scheduler) onSendMsg(msg *message) error {
 		return err
 	}
 
-	if msg.from != "" {
-		sh.resetTimer(msg.from)
-	}
 	sh.resetTimer(msg.to)
 
 	return ctx.submit(msg)
@@ -156,7 +171,12 @@ func (sh *scheduler) onRecvIdle(ctx *context) {
 }
 
 func (sh *scheduler) resetTimer(id ReceiverID) {
-	tm := sh.idleTimers[string(id)]
+	tm, ok := sh.idleTimers[string(id)]
+	if !ok {
+		fmt.Printf("[WARN] did not find timer for %s\n", id)
+		return
+	}
+
 	tm.Reset(RouterIdleTimeout) // note: timer is reset even when expired
 }
 
@@ -187,8 +207,8 @@ func (sh *scheduler) context(id ReceiverID) (*context, error) {
 	return ctx, nil
 }
 
-func (sh *scheduler) isClosed() bool {
-	return atomic.LoadUint32(&sh.closed) == 1
+func (sh *scheduler) isStopped() bool {
+	return atomic.LoadUint32(&sh.stopped) == 1
 }
 
 func (sh *scheduler) newSendCmd(from, to ReceiverID, payload interface{}) (*sendMsgCmd, error) {

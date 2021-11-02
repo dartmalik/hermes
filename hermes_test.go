@@ -151,13 +151,10 @@ func BenchmarkSends(b *testing.B) {
 		}
 	})
 
-	Close(&net)
-
-	for atomic.LoadUint32(&mnum) != uint32(b.N) {
-		time.Sleep(10 * time.Millisecond)
+	Delete(&net)
+	if atomic.LoadUint32(&mnum) != uint32(b.N) {
+		b.Fatalf("expected to complete %d runs, but completed %d\n", b.N, mnum)
 	}
-
-	fmt.Printf("runs: %d\n", atomic.LoadUint32(&mnum))
 }
 
 func BenchmarkCreationAndSends(b *testing.B) {
@@ -192,13 +189,10 @@ func BenchmarkCreationAndSends(b *testing.B) {
 		}
 	})
 
-	Close(&net)
-
-	for atomic.LoadUint32(&mnum) != uint32(b.N) {
-		time.Sleep(10 * time.Millisecond)
+	Delete(&net)
+	if atomic.LoadUint32(&mnum) != uint32(b.N) {
+		b.Fatalf("expected to complete %d runs, but completed %d\n", b.N, mnum)
 	}
-
-	fmt.Printf("runs: %d\n", atomic.LoadUint32(&mnum))
 }
 
 func BenchmarkRequests(b *testing.B) {
@@ -213,6 +207,8 @@ func BenchmarkRequests(b *testing.B) {
 	fmt.Printf("running test with runs: %d\n", b.N)
 
 	passMessages(b, net, b.N, 1)
+
+	Delete(&net)
 }
 
 func passMessages(t Tester, net *Hermes, runs, iter int) {

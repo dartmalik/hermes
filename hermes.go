@@ -361,16 +361,16 @@ func New(rf ReceiverFactory) (*Hermes, error) {
 	return net, nil
 }
 
-// Close closes the hermes instance. This is a blocking call and will
+// Delete closes the hermes instance. This is a blocking call and will
 // wait on all the routers to be empitied of work.
-func Close(npp **Hermes) error {
+func Delete(npp **Hermes) error {
 	if npp == nil || *npp == nil {
 		return ErrInvalidInstance
 	}
 
 	net := *npp
-	if !atomic.CompareAndSwapUint32(&net.closed, 0, 1) {
-		return ErrInstanceClosed
+	for _, sh := range net.shs {
+		sh.stop()
 	}
 
 	*npp = nil
