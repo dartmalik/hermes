@@ -80,14 +80,14 @@ func TestIdleReceiver(t *testing.T) {
 
 	net, err := New(func(id ReceiverID) (Receiver, error) {
 		recv := func(ctx Context, m Message) {
-			switch m.Payload().(type) {
+			switch msg := m.Payload().(type) {
 			case *Joined:
 				joined++
 				msgs++
 
-			case *Ping:
+			case *SendPingRequest:
 				msgs++
-				ctx.Reply(m, &Pong{})
+				msg.replyCh <- nil
 
 			default:
 				msgs++
@@ -100,23 +100,27 @@ func TestIdleReceiver(t *testing.T) {
 		t.Fatalf("new actor system failed with error: %s\n", err.Error())
 	}
 
-	err = net.Send("", "r", &Ping{})
+	replyCh := make(chan error, 1)
+	err = net.Send("", "r", &SendPingRequest{replyCh: replyCh})
 	if err != nil {
 		t.Fatalf("send failed with error: %s\n", err.Error())
 	}
+	<-replyCh
 
-	time.Sleep(RouterIdleTimeout + 100*time.Millisecond)
+	time.Sleep(ContextIdleTimeout + 100*time.Millisecond)
 
-	err = net.Send("", "r", &Ping{})
+	replyCh = make(chan error, 1)
+	err = net.Send("", "r", &SendPingRequest{replyCh: replyCh})
 	if err != nil {
 		t.Fatalf("send failed with error: %s\n", err.Error())
 	}
+	<-replyCh
 
 	if joined != 2 {
 		t.Fatalf("expected %d joined events but got %d", 2, joined)
 	}
 	if msgs != 4 {
-		t.Fatalf("expected %d events but got %d", 5, msgs)
+		t.Fatalf("expected %d events but got %d", 4, msgs)
 	}
 }
 

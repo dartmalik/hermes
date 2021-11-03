@@ -21,14 +21,13 @@ type leaveCmd struct {
 }
 
 type scheduler struct {
-	id         int
-	net        *Hermes
-	factory    ReceiverFactory
-	ctx        map[string]*context
-	idleTimers map[string]*time.Timer
-	cmds       *Mailbox
-	stopped    uint32
-	joined     *message
+	id      int
+	net     *Hermes
+	factory ReceiverFactory
+	ctx     map[string]*context
+	cmds    *Mailbox
+	stopped uint32
+	joined  *message
 }
 
 func newScheduler(id int, net *Hermes, rf ReceiverFactory) (*scheduler, error) {
@@ -40,12 +39,11 @@ func newScheduler(id int, net *Hermes, rf ReceiverFactory) (*scheduler, error) {
 	}
 
 	sh := &scheduler{
-		id:         id,
-		net:        net,
-		factory:    rf,
-		ctx:        make(map[string]*context),
-		idleTimers: make(map[string]*time.Timer),
-		joined:     &message{payload: &Joined{}},
+		id:      id,
+		net:     net,
+		factory: rf,
+		ctx:     make(map[string]*context),
+		joined:  &message{payload: &Joined{}},
 	}
 
 	cmds, err := newMailbox(1024, sh.onCmd)
@@ -144,8 +142,6 @@ func (sh *scheduler) onSendMsg(msg *message) error {
 		return err
 	}
 
-	sh.resetTimer(msg.to)
-
 	return ctx.submit(msg)
 }
 
@@ -160,24 +156,14 @@ func (sh *scheduler) onRemoveRecv(id ReceiverID) {
 	}
 }
 
-func (sh *scheduler) onRecvIdle(ctx *context) {
-	cmd, err := sh.newLeaveCmd(ctx.ID())
+func (sh *scheduler) onRecvIdle(id ReceiverID) {
+	cmd, err := sh.newLeaveCmd(id)
 	if err != nil {
 		fmt.Printf("[ERROR] received idle timeout for invalid receiver")
 		return
 	}
 
 	sh.cmds.post(cmd)
-}
-
-func (sh *scheduler) resetTimer(id ReceiverID) {
-	tm, ok := sh.idleTimers[string(id)]
-	if !ok {
-		fmt.Printf("[WARN] did not find timer for %s\n", id)
-		return
-	}
-
-	tm.Reset(RouterIdleTimeout) // note: timer is reset even when expired
 }
 
 func (sh *scheduler) context(id ReceiverID) (*context, error) {
@@ -191,18 +177,15 @@ func (sh *scheduler) context(id ReceiverID) (*context, error) {
 		return nil, err
 	}
 
-	ctx, err = newContext(id, sh.net, recv)
+	ctx, err = newContext(id, sh.net, recv, func() {
+		sh.onRecvIdle(id)
+	})
 	if err != nil {
 		return nil, err
 	}
 
 	sh.ctx[string(id)] = ctx
 	ctx.submit(sh.joined)
-
-	t := time.AfterFunc(RouterIdleTimeout, func() {
-		sh.onRecvIdle(ctx)
-	})
-	sh.idleTimers[string(id)] = t
 
 	return ctx, nil
 }

@@ -15,15 +15,12 @@ const (
 	MailboxProcessing
 	MailboxStopped
 
-	DefaultNumRouters = 20
-	RouterIdleTimeout = 5 * 60 * time.Second
+	ContextIdleTimeout = 5 * 1 * time.Second
 )
 
 var (
-	ErrQueueIllegalState     = errors.New("no_capacity")
 	ErrContextInvalidMessage = errors.New("invalid_message")
 	ErrContextStopped        = errors.New("context_stopped")
-	ErrInstanceClosed        = errors.New("hermes_instance_closed")
 	ErrInvalidInstance       = errors.New("invalid_instance")
 )
 
@@ -97,7 +94,7 @@ func (box *Mailbox) process() {
 
 func (box *Mailbox) processMsgs() {
 	for e := box.msgs.Peek(); e != nil; {
-		box.onProcess(e.(Message))
+		box.onProcess(e)
 		e = box.msgs.RemoveAndPeek()
 	}
 	atomic.CompareAndSwapInt32(&box.state, MailboxProcessing, MailboxIdle)
@@ -129,13 +126,14 @@ type context struct {
 	net     *Hermes
 	recv    Receiver
 	mailbox *Mailbox
+	idleT   *time.Timer
 
 	reqsLock sync.Mutex
 	curReqID int
 	reqs     map[string]chan Message
 }
 
-func newContext(id ReceiverID, net *Hermes, recv Receiver) (*context, error) {
+func newContext(id ReceiverID, net *Hermes, recv Receiver, onIdle func()) (*context, error) {
 	if id == "" {
 		return nil, errors.New("invalid_id")
 	}
@@ -145,14 +143,24 @@ func newContext(id ReceiverID, net *Hermes, recv Receiver) (*context, error) {
 	if recv == nil {
 		return nil, errors.New("invalid_receiver")
 	}
+	if onIdle == nil {
+		return nil, errors.New("invalid_idle_callback")
+	}
 
-	ctx := &context{id: id, net: net, recv: recv, reqs: make(map[string]chan Message)}
+	ctx := &context{
+		id:   id,
+		net:  net,
+		recv: recv,
+		reqs: make(map[string]chan Message),
+	}
 
 	mb, err := newMailbox(64, ctx.onProcess)
 	if err != nil {
 		return nil, err
 	}
 	ctx.mailbox = mb
+
+	ctx.idleT = time.AfterFunc(ContextIdleTimeout, onIdle)
 
 	return ctx, nil
 }
@@ -166,10 +174,14 @@ func (ctx *context) SetReceiver(recv Receiver) {
 }
 
 func (ctx *context) Send(to ReceiverID, payload interface{}) error {
+	ctx.idleT.Reset(ContextIdleTimeout)
+
 	return ctx.net.Send(ctx.id, to, payload)
 }
 
 func (ctx *context) Request(to ReceiverID, payload interface{}) (chan Message, error) {
+	ctx.idleT.Reset(ContextIdleTimeout)
+
 	cid, replyCh := ctx.newReq()
 
 	err := ctx.net.request(ctx.id, to, payload, cid)
@@ -197,6 +209,8 @@ func (ctx *context) RequestWithTimeout(to ReceiverID, payload interface{}, timeo
 }
 
 func (ctx *context) Reply(mi Message, reply interface{}) error {
+	ctx.idleT.Reset(ContextIdleTimeout)
+
 	msg := mi.(*message)
 	if msg.to != ctx.id {
 		return errors.New("not_the_recipient")
@@ -206,6 +220,8 @@ func (ctx *context) Reply(mi Message, reply interface{}) error {
 }
 
 func (ctx *context) Schedule(after time.Duration, msg interface{}) (Timer, error) {
+	ctx.idleT.Reset(ContextIdleTimeout)
+
 	if msg == nil {
 		return nil, ErrContextInvalidMessage
 	}
@@ -221,11 +237,9 @@ func (ctx *context) stop() bool {
 	return ctx.mailbox.stop()
 }
 
-func (ctx *context) onProcess(msg interface{}) {
-	ctx.recv(ctx, msg.(Message))
-}
-
 func (ctx *context) submit(mi Message) error {
+	ctx.idleT.Reset(ContextIdleTimeout)
+
 	msg := mi.(*message)
 	if msg.replyTo != ctx.id {
 		replyCh := ctx.deleteReq(msg.reqID)
@@ -236,6 +250,10 @@ func (ctx *context) submit(mi Message) error {
 	}
 
 	return ctx.mailbox.post(mi)
+}
+
+func (ctx *context) onProcess(msg interface{}) {
+	ctx.recv(ctx, msg.(Message))
 }
 
 func (ctx *context) newReq() (string, chan Message) {
