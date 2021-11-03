@@ -233,7 +233,7 @@ func (sh *scheduler) newRequestCmd(from, to ReceiverID, payload interface{}, req
 func (sh *scheduler) newReplyCmd(req Message, reply interface{}) (*sendMsgCmd, error) {
 	rm, ok := req.(*message)
 	if !ok {
-		return nil, ErrContextInvalidMessage
+		return nil, ErrContextMsg
 	}
 
 	cmd, err := sh.newSendCmd(rm.to, rm.from, reply)

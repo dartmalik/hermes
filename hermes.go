@@ -11,17 +11,29 @@ import (
 )
 
 const (
+	IdleTimeout = 5 * 60 * time.Second
+
 	MailboxIdle = iota
 	MailboxProcessing
 	MailboxStopped
-
-	ContextIdleTimeout = 5 * 60 * time.Second
 )
 
 var (
-	ErrContextInvalidMessage = errors.New("invalid_message")
+	ErrInvalidInstance   = errors.New("invalid_instance")
+	ErrInvalidMsgTo      = errors.New("invalid_msg_to")
+	ErrInvalidMsgFrom    = errors.New("invalid_msg_from")
+	ErrInvalidMsgPayload = errors.New("invalid_msg_payload")
+	ErrInvalidRecvID     = errors.New("invalid_recv_id")
+
+	ErrMailboxProcessCB = errors.New("invalid_process_cb")
+
+	ErrContextMsg            = errors.New("invalid_message")
 	ErrContextStopped        = errors.New("context_stopped")
-	ErrInvalidInstance       = errors.New("invalid_instance")
+	ErrContextId             = errors.New("invalid_id")
+	ErrContextSys            = errors.New("invalid_system")
+	ErrContextRecv           = errors.New("invalid_receiver")
+	ErrContextIdleCB         = errors.New("invalid_idle_callback")
+	ErrContextRequestTimeout = errors.New("request_timeout")
 )
 
 type MailboxProcessCB func(interface{})
@@ -48,7 +60,7 @@ type Mailbox struct {
 
 func newMailbox(segCap int, cb MailboxProcessCB) (*Mailbox, error) {
 	if cb == nil {
-		return nil, errors.New("invalid_process_cb")
+		return nil, ErrMailboxProcessCB
 	}
 
 	return &Mailbox{msgs: NewSegmentedQueue(segCap), onProcess: cb, state: MailboxIdle}, nil
@@ -68,7 +80,7 @@ func (box *Mailbox) stop() bool {
 
 func (box *Mailbox) post(msg interface{}) error {
 	if msg == nil {
-		return ErrContextInvalidMessage
+		return ErrContextMsg
 	}
 	if atomic.LoadInt32(&box.state) == MailboxStopped {
 		return ErrContextStopped
@@ -136,16 +148,16 @@ type context struct {
 
 func newContext(id ReceiverID, net *Hermes, recv Receiver, idleDur time.Duration, onIdle func()) (*context, error) {
 	if id == "" {
-		return nil, errors.New("invalid_id")
+		return nil, ErrContextId
 	}
 	if net == nil {
-		return nil, errors.New("invalid_system")
+		return nil, ErrContextSys
 	}
 	if recv == nil {
-		return nil, errors.New("invalid_receiver")
+		return nil, ErrContextRecv
 	}
 	if onIdle == nil {
-		return nil, errors.New("invalid_idle_callback")
+		return nil, ErrContextIdleCB
 	}
 
 	ctx := &context{
@@ -206,7 +218,7 @@ func (ctx *context) RequestWithTimeout(to ReceiverID, payload interface{}, timeo
 		return reply, nil
 
 	case <-time.After(timeout):
-		return nil, errors.New("request_timeout")
+		return nil, ErrContextRequestTimeout
 	}
 }
 
@@ -225,7 +237,7 @@ func (ctx *context) Schedule(after time.Duration, msg interface{}) (Timer, error
 	ctx.idleT.Reset(ctx.idleDur)
 
 	if msg == nil {
-		return nil, ErrContextInvalidMessage
+		return nil, ErrContextMsg
 	}
 
 	t := time.AfterFunc(after, func() {
@@ -303,20 +315,13 @@ func (m *message) Payload() interface{} {
 	return m.payload
 }
 
-var (
-	ErrInvalidMsgTo      = errors.New("invalid_msg_to")
-	ErrInvalidMsgFrom    = errors.New("invalid_msg_from")
-	ErrInvalidMsgPayload = errors.New("invalid_msg_payload")
-	ErrInvalidRecvID     = errors.New("invalid_recv_id")
-)
-
 type Opts struct {
 	RF      ReceiverFactory
 	IdleDur time.Duration
 }
 
 func NewOpts() *Opts {
-	return &Opts{IdleDur: ContextIdleTimeout}
+	return &Opts{IdleDur: IdleTimeout}
 }
 
 // Hermes is an overlay network that routes messages between senders and receivers.
