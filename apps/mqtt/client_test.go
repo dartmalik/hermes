@@ -376,7 +376,9 @@ func recvFactory(id hermes.ReceiverID) (hermes.Receiver, error) {
 }
 
 func createNet(t *testing.T) *hermes.Hermes {
-	net, err := hermes.New(recvFactory)
+	opts := hermes.NewOpts()
+	opts.RF = recvFactory
+	net, err := hermes.New(opts)
 	if err != nil {
 		t.Fatalf("failed to created network: %s\n", err.Error())
 	}

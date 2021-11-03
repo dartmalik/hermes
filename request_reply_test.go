@@ -132,7 +132,9 @@ func IOTDeviceFactory(id ReceiverID) (Receiver, error) {
 }
 
 func TestRequestReply(t *testing.T) {
-	net, err := New(IOTDeviceFactory)
+	opts := NewOpts()
+	opts.RF = IOTDeviceFactory
+	net, err := New(opts)
 	if err != nil {
 		t.Fatalf("new actor system failed with error: %s\n", err.Error())
 	}

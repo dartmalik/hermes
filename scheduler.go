@@ -21,16 +21,17 @@ type leaveCmd struct {
 }
 
 type scheduler struct {
-	id      int
-	net     *Hermes
-	factory ReceiverFactory
-	ctx     map[string]*context
-	cmds    *Mailbox
-	stopped uint32
-	joined  *message
+	id         int
+	net        *Hermes
+	factory    ReceiverFactory
+	ctxIdleDur time.Duration
+	ctx        map[string]*context
+	cmds       *Mailbox
+	stopped    uint32
+	joined     *message
 }
 
-func newScheduler(id int, net *Hermes, rf ReceiverFactory) (*scheduler, error) {
+func newScheduler(id int, net *Hermes, rf ReceiverFactory, idleDur time.Duration) (*scheduler, error) {
 	if net == nil {
 		return nil, errors.New("invalid_hermes_instance")
 	}
@@ -39,11 +40,12 @@ func newScheduler(id int, net *Hermes, rf ReceiverFactory) (*scheduler, error) {
 	}
 
 	sh := &scheduler{
-		id:      id,
-		net:     net,
-		factory: rf,
-		ctx:     make(map[string]*context),
-		joined:  &message{payload: &Joined{}},
+		id:         id,
+		net:        net,
+		factory:    rf,
+		ctxIdleDur: idleDur,
+		ctx:        make(map[string]*context),
+		joined:     &message{payload: &Joined{}},
 	}
 
 	cmds, err := newMailbox(1024, sh.onCmd)
@@ -177,7 +179,7 @@ func (sh *scheduler) context(id ReceiverID) (*context, error) {
 		return nil, err
 	}
 
-	ctx, err = newContext(id, sh.net, recv, func() {
+	ctx, err = newContext(id, sh.net, recv, sh.ctxIdleDur, func() {
 		sh.onRecvIdle(id)
 	})
 	if err != nil {

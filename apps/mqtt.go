@@ -10,7 +10,9 @@ import (
 )
 
 func main() {
-	net, err := hermes.New(factory)
+	opts := hermes.NewOpts()
+	opts.RF = factory
+	net, err := hermes.New(opts)
 	if err != nil {
 		fmt.Printf("[FATAL] unable to create hermes: %s\n", err.Error())
 		return

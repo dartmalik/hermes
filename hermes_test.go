@@ -63,10 +63,13 @@ type Tester interface {
 }
 
 func TestMessagePassing(t *testing.T) {
-	net, err := New(func(id ReceiverID) (Receiver, error) {
+	opts := NewOpts()
+	opts.RF = func(id ReceiverID) (Receiver, error) {
 		a := &PongActor{}
 		return a.receive, nil
-	})
+	}
+
+	net, err := New(opts)
 	if err != nil {
 		t.Fatalf("new actor system failed with error: %s\n", err.Error())
 	}
@@ -78,7 +81,9 @@ func TestIdleReceiver(t *testing.T) {
 	joined := 0
 	msgs := 0
 
-	net, err := New(func(id ReceiverID) (Receiver, error) {
+	opts := NewOpts()
+	opts.IdleDur = 100 * time.Millisecond
+	opts.RF = func(id ReceiverID) (Receiver, error) {
 		recv := func(ctx Context, m Message) {
 			switch msg := m.Payload().(type) {
 			case *Joined:
@@ -95,7 +100,9 @@ func TestIdleReceiver(t *testing.T) {
 		}
 
 		return recv, nil
-	})
+	}
+
+	net, err := New(opts)
 	if err != nil {
 		t.Fatalf("new actor system failed with error: %s\n", err.Error())
 	}
@@ -107,7 +114,7 @@ func TestIdleReceiver(t *testing.T) {
 	}
 	<-replyCh
 
-	time.Sleep(ContextIdleTimeout + 100*time.Millisecond)
+	time.Sleep(opts.IdleDur + 100*time.Millisecond)
 
 	replyCh = make(chan error, 1)
 	err = net.Send("", "r", &SendPingRequest{replyCh: replyCh})
@@ -138,9 +145,9 @@ func BenchmarkSends(b *testing.B) {
 		}
 	}
 
-	net, err := New(func(id ReceiverID) (Receiver, error) {
-		return rcv, nil
-	})
+	opts := NewOpts()
+	opts.RF = func(id ReceiverID) (Receiver, error) { return rcv, nil }
+	net, err := New(opts)
 	if err != nil {
 		b.Fatalf("new actor system failed with error: %s\n", err.Error())
 	}
@@ -176,9 +183,9 @@ func BenchmarkCreationAndSends(b *testing.B) {
 		}
 	}
 
-	net, err := New(func(id ReceiverID) (Receiver, error) {
-		return rcv, nil
-	})
+	opts := NewOpts()
+	opts.RF = func(id ReceiverID) (Receiver, error) { return rcv, nil }
+	net, err := New(opts)
 	if err != nil {
 		b.Fatalf("new actor system failed with error: %s\n", err.Error())
 	}
@@ -200,10 +207,12 @@ func BenchmarkCreationAndSends(b *testing.B) {
 }
 
 func BenchmarkRequests(b *testing.B) {
-	net, err := New(func(id ReceiverID) (Receiver, error) {
+	opts := NewOpts()
+	opts.RF = func(id ReceiverID) (Receiver, error) {
 		a := &PongActor{}
 		return a.receive, nil
-	})
+	}
+	net, err := New(opts)
 	if err != nil {
 		b.Fatalf("new actor system failed with error: %s\n", err.Error())
 	}

@@ -15,7 +15,7 @@ const (
 	MailboxProcessing
 	MailboxStopped
 
-	ContextIdleTimeout = 5 * 1 * time.Second
+	ContextIdleTimeout = 5 * 60 * time.Second
 )
 
 var (
@@ -126,6 +126,7 @@ type context struct {
 	net     *Hermes
 	recv    Receiver
 	mailbox *Mailbox
+	idleDur time.Duration
 	idleT   *time.Timer
 
 	reqsLock sync.Mutex
@@ -133,7 +134,7 @@ type context struct {
 	reqs     map[string]chan Message
 }
 
-func newContext(id ReceiverID, net *Hermes, recv Receiver, onIdle func()) (*context, error) {
+func newContext(id ReceiverID, net *Hermes, recv Receiver, idleDur time.Duration, onIdle func()) (*context, error) {
 	if id == "" {
 		return nil, errors.New("invalid_id")
 	}
@@ -148,10 +149,11 @@ func newContext(id ReceiverID, net *Hermes, recv Receiver, onIdle func()) (*cont
 	}
 
 	ctx := &context{
-		id:   id,
-		net:  net,
-		recv: recv,
-		reqs: make(map[string]chan Message),
+		id:      id,
+		net:     net,
+		recv:    recv,
+		idleDur: idleDur,
+		reqs:    make(map[string]chan Message),
 	}
 
 	mb, err := newMailbox(64, ctx.onProcess)
@@ -160,7 +162,7 @@ func newContext(id ReceiverID, net *Hermes, recv Receiver, onIdle func()) (*cont
 	}
 	ctx.mailbox = mb
 
-	ctx.idleT = time.AfterFunc(ContextIdleTimeout, onIdle)
+	ctx.idleT = time.AfterFunc(idleDur, onIdle)
 
 	return ctx, nil
 }
@@ -174,13 +176,13 @@ func (ctx *context) SetReceiver(recv Receiver) {
 }
 
 func (ctx *context) Send(to ReceiverID, payload interface{}) error {
-	ctx.idleT.Reset(ContextIdleTimeout)
+	ctx.idleT.Reset(ctx.idleDur)
 
 	return ctx.net.Send(ctx.id, to, payload)
 }
 
 func (ctx *context) Request(to ReceiverID, payload interface{}) (chan Message, error) {
-	ctx.idleT.Reset(ContextIdleTimeout)
+	ctx.idleT.Reset(ctx.idleDur)
 
 	cid, replyCh := ctx.newReq()
 
@@ -209,7 +211,7 @@ func (ctx *context) RequestWithTimeout(to ReceiverID, payload interface{}, timeo
 }
 
 func (ctx *context) Reply(mi Message, reply interface{}) error {
-	ctx.idleT.Reset(ContextIdleTimeout)
+	ctx.idleT.Reset(ctx.idleDur)
 
 	msg := mi.(*message)
 	if msg.to != ctx.id {
@@ -220,7 +222,7 @@ func (ctx *context) Reply(mi Message, reply interface{}) error {
 }
 
 func (ctx *context) Schedule(after time.Duration, msg interface{}) (Timer, error) {
-	ctx.idleT.Reset(ContextIdleTimeout)
+	ctx.idleT.Reset(ctx.idleDur)
 
 	if msg == nil {
 		return nil, ErrContextInvalidMessage
@@ -238,7 +240,7 @@ func (ctx *context) stop() bool {
 }
 
 func (ctx *context) submit(mi Message) error {
-	ctx.idleT.Reset(ContextIdleTimeout)
+	ctx.idleT.Reset(ctx.idleDur)
 
 	msg := mi.(*message)
 	if msg.replyTo != ctx.id {
@@ -308,6 +310,15 @@ var (
 	ErrInvalidRecvID     = errors.New("invalid_recv_id")
 )
 
+type Opts struct {
+	RF      ReceiverFactory
+	IdleDur time.Duration
+}
+
+func NewOpts() *Opts {
+	return &Opts{IdleDur: ContextIdleTimeout}
+}
+
 // Hermes is an overlay network that routes messages between senders and receivers.
 //
 // Concepts
@@ -347,27 +358,26 @@ var (
 // * (planned) Supports a single abstraction for support both concurrent and distributed applications.
 //
 type Hermes struct {
-	shs        []*scheduler
-	ctx        map[string]*context
-	idleTimers map[string]*time.Timer
-	seed       maphash.Seed
+	shs  []*scheduler
+	seed maphash.Seed
 }
 
-func New(rf ReceiverFactory) (*Hermes, error) {
-	if rf == nil {
+func New(opts *Opts) (*Hermes, error) {
+	if opts == nil {
+		return nil, errors.New("invalid_options")
+	}
+	if opts.RF == nil {
 		return nil, errors.New("invalid_factory")
 	}
 
 	net := &Hermes{
-		seed:       maphash.MakeSeed(),
-		ctx:        make(map[string]*context),
-		idleTimers: make(map[string]*time.Timer),
+		seed: maphash.MakeSeed(),
 	}
 
 	numSh := runtime.NumCPU() * 2
 	shs := make([]*scheduler, numSh)
 	for si := 0; si < numSh; si++ {
-		sh, err := newScheduler(0, net, rf)
+		sh, err := newScheduler(0, net, opts.RF, opts.IdleDur)
 		if err != nil {
 			return nil, err
 		}
