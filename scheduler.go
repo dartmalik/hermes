@@ -82,12 +82,7 @@ func (sh *scheduler) send(from ReceiverID, to ReceiverID, payload interface{}) e
 		return err
 	}
 
-	err = sh.localSend(cmd)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return sh.localSend(cmd)
 }
 
 // request implements a request-Reply pattern by exchaning messages between the sender and receiver
@@ -98,12 +93,7 @@ func (sh *scheduler) request(from, to ReceiverID, payload interface{}, reqID str
 		return err
 	}
 
-	err = sh.localSend(cmd)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return sh.localSend(cmd)
 }
 
 func (sh *scheduler) reply(mi Message, reply interface{}) error {
