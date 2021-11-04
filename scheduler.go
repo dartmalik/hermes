@@ -16,7 +16,7 @@ type sendMsgCmd struct {
 	replyCh chan error
 }
 
-type leaveCmd struct {
+type removeRecvCmd struct {
 	id ReceiverID
 }
 
@@ -123,7 +123,7 @@ func (sh *scheduler) onCmd(ci interface{}) {
 	case *sendMsgCmd:
 		cmd.replyCh <- sh.onSendMsg(&cmd.message)
 
-	case *leaveCmd:
+	case *removeRecvCmd:
 		sh.onRemoveRecv(cmd.id)
 	}
 }
@@ -149,7 +149,7 @@ func (sh *scheduler) onRemoveRecv(id ReceiverID) {
 }
 
 func (sh *scheduler) onRecvIdle(id ReceiverID) {
-	cmd, err := sh.newLeaveCmd(id)
+	cmd, err := sh.newRemoveRecvCmd(id)
 	if err != nil {
 		fmt.Printf("[ERROR] received idle timeout for invalid receiver")
 		return
@@ -236,10 +236,10 @@ func (sh *scheduler) newReplyCmd(req Message, reply interface{}) (*sendMsgCmd, e
 	return cmd, nil
 }
 
-func (sh *scheduler) newLeaveCmd(id ReceiverID) (*leaveCmd, error) {
+func (sh *scheduler) newRemoveRecvCmd(id ReceiverID) (*removeRecvCmd, error) {
 	if id == "" {
 		return nil, ErrInvalidRecvID
 	}
 
-	return &leaveCmd{id: id}, nil
+	return &removeRecvCmd{id: id}, nil
 }
