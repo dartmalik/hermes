@@ -84,7 +84,7 @@ func (grp *IOTDeviceGroup) onAddDevice(ctx Context, req *IOTDeviceGroupAddReques
 
 func (grp *IOTDeviceGroup) onMeasure(ctx Context, req *IOTDeviceGroupMeasureRequest) {
 	values := make([]float32, 0, len(grp.devices))
-	reqChs := make([]chan Message, 0, len(grp.devices))
+	reqChs := make([]<-chan Message, 0, len(grp.devices))
 
 	for id := range grp.devices {
 		reqCh, err := ctx.Request(id, &IOTDeviceMeasureRequest{})

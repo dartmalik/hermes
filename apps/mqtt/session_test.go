@@ -34,7 +34,7 @@ func (ctx *TestContext) Send(to hermes.ReceiverID, payload interface{}) error {
 	return ctx.onSend(to, payload)
 }
 
-func (ctx *TestContext) Request(to hermes.ReceiverID, request interface{}) (chan hermes.Message, error) {
+func (ctx *TestContext) Request(to hermes.ReceiverID, request interface{}) (<-chan hermes.Message, error) {
 	return ctx.onRequest(to, request)
 }
 

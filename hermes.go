@@ -127,8 +127,8 @@ type Context interface {
 	ID() ReceiverID
 	SetReceiver(Receiver)
 	Send(to ReceiverID, payload interface{}) error
-	Request(to ReceiverID, request interface{}) (chan Message, error)
-	RequestWithTimeout(to ReceiverID, request interface{}, timeout time.Duration) (Message, error)
+	Request(to ReceiverID, request interface{}) (<-chan Message, error)
+	RequestWithTimeout(to ReceiverID, payload interface{}, timeout time.Duration) (Message, error)
 	Reply(msg Message, reply interface{}) error
 	Schedule(after time.Duration, msg interface{}) (Timer, error)
 }
@@ -193,7 +193,7 @@ func (ctx *context) Send(to ReceiverID, payload interface{}) error {
 	return ctx.net.Send(ctx.id, to, payload)
 }
 
-func (ctx *context) Request(to ReceiverID, payload interface{}) (chan Message, error) {
+func (ctx *context) Request(to ReceiverID, payload interface{}) (<-chan Message, error) {
 	ctx.idleT.Reset(ctx.idleDur)
 
 	cid, replyCh := ctx.newReq()
