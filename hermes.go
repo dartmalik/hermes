@@ -2,6 +2,7 @@ package hermes
 
 import (
 	"errors"
+	"fmt"
 	"hash/maphash"
 	"runtime"
 	"strconv"
@@ -255,12 +256,15 @@ func (ctx *context) submit(mi Message) error {
 	ctx.idleT.Reset(ctx.idleDur)
 
 	msg := mi.(*message)
-	if msg.replyTo != ctx.id {
+	if msg.replyTo == ctx.id {
 		replyCh := ctx.deleteReq(msg.reqID)
 		if replyCh != nil {
 			replyCh <- mi
-			return nil
+		} else {
+			fmt.Printf("[WARN] invaid reqID: %s\n", msg.reqID)
 		}
+
+		return nil
 	}
 
 	return ctx.mailbox.post(mi)

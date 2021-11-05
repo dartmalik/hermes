@@ -232,6 +232,7 @@ func (sh *scheduler) newReplyCmd(req Message, reply interface{}) (*sendMsgCmd, e
 	}
 
 	cmd.reqID = rm.reqID
+	cmd.replyTo = rm.replyTo
 
 	return cmd, nil
 }
