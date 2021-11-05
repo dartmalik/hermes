@@ -196,11 +196,11 @@ func (ctx *context) Send(to ReceiverID, payload interface{}) error {
 func (ctx *context) Request(to ReceiverID, payload interface{}) (<-chan Message, error) {
 	ctx.idleT.Reset(ctx.idleDur)
 
-	cid, replyCh := ctx.newReq()
+	rid, replyCh := ctx.newReq()
 
-	err := ctx.net.request(ctx.id, to, payload, cid)
+	err := ctx.net.request(ctx.id, to, payload, rid)
 	if err != nil {
-		ctx.deleteReq(cid)
+		ctx.deleteReq(rid)
 		return nil, err
 	}
 
@@ -275,13 +275,12 @@ func (ctx *context) newReq() (string, chan Message) {
 	defer ctx.reqsLock.Unlock()
 
 	ctx.curReqID++
-	rid := ctx.curReqID
+	rid := strconv.Itoa(ctx.curReqID)
 
-	cid := strconv.Itoa(rid)
 	replyCh := make(chan Message, 1)
-	ctx.reqs[cid] = replyCh
+	ctx.reqs[rid] = replyCh
 
-	return cid, replyCh
+	return rid, replyCh
 }
 
 func (ctx *context) deleteReq(cid string) chan Message {
@@ -420,8 +419,8 @@ func (net *Hermes) Send(from ReceiverID, to ReceiverID, payload interface{}) err
 
 // request implements a request-Reply pattern by exchaning messages between the sender and receiver
 // The returned channel can be used to wait on the reply.
-func (net *Hermes) request(from, to ReceiverID, payload interface{}, corID string) error {
-	return net.sh(to).request(from, to, payload, corID)
+func (net *Hermes) request(from, to ReceiverID, payload interface{}, reqID string) error {
+	return net.sh(to).request(from, to, payload, reqID)
 }
 
 func (net *Hermes) reply(req Message, reply interface{}) error {
