@@ -87,7 +87,7 @@ func (seg *syncSegment) isEmpty() bool {
 }
 
 const (
-	mpscDefaultSegLen = 1024
+	DefaultSegLen = 1024
 )
 
 type Queue interface {
@@ -107,7 +107,7 @@ type SegmentedQueue struct {
 
 func NewSegmentedQueue(segCap int) *SegmentedQueue {
 	if segCap <= 0 {
-		segCap = mpscDefaultSegLen
+		segCap = DefaultSegLen
 	}
 
 	q := &SegmentedQueue{segCap: segCap}
