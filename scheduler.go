@@ -16,8 +16,67 @@ type sendMsgCmd struct {
 	replyCh chan error
 }
 
+func newSendCmd(from, to ReceiverID, payload interface{}) (*sendMsgCmd, error) {
+	if to == "" {
+		return nil, ErrInvalidMsgTo
+	}
+	if payload == nil {
+		return nil, ErrInvalidMsgPayload
+	}
+
+	return &sendMsgCmd{
+		message: message{
+			from:    from,
+			to:      to,
+			payload: payload,
+		},
+		replyCh: make(chan error, 1),
+	}, nil
+}
+
+func newRequestCmd(from, to ReceiverID, payload interface{}, reqID string) (*sendMsgCmd, error) {
+	if from == "" {
+		return nil, ErrInvalidMsgFrom
+	}
+
+	cmd, err := newSendCmd(from, to, payload)
+	if err != nil {
+		return nil, err
+	}
+
+	cmd.replyTo = from
+	cmd.reqID = reqID
+
+	return cmd, nil
+}
+
+func newReplyCmd(req Message, reply interface{}) (*sendMsgCmd, error) {
+	rm, ok := req.(*message)
+	if !ok {
+		return nil, ErrContextMsg
+	}
+
+	cmd, err := newSendCmd(rm.to, rm.from, reply)
+	if err != nil {
+		return nil, err
+	}
+
+	cmd.reqID = rm.reqID
+	cmd.replyTo = rm.replyTo
+
+	return cmd, nil
+}
+
 type removeRecvCmd struct {
 	id ReceiverID
+}
+
+func newRemoveRecvCmd(id ReceiverID) (*removeRecvCmd, error) {
+	if id == "" {
+		return nil, ErrInvalidRecvID
+	}
+
+	return &removeRecvCmd{id: id}, nil
 }
 
 type scheduler struct {
@@ -77,7 +136,7 @@ func (sh *scheduler) stop() error {
 
 // Send sends the specified message payload to the specified receiver
 func (sh *scheduler) send(from ReceiverID, to ReceiverID, payload interface{}) error {
-	cmd, err := sh.newSendCmd(from, to, payload)
+	cmd, err := newSendCmd(from, to, payload)
 	if err != nil {
 		return err
 	}
@@ -88,7 +147,7 @@ func (sh *scheduler) send(from ReceiverID, to ReceiverID, payload interface{}) e
 // request implements a request-Reply pattern by exchaning messages between the sender and receiver
 // The returned channel can be used to wait on the reply.
 func (sh *scheduler) request(from, to ReceiverID, payload interface{}, reqID string) error {
-	cmd, err := sh.newRequestCmd(from, to, payload, reqID)
+	cmd, err := newRequestCmd(from, to, payload, reqID)
 	if err != nil {
 		return err
 	}
@@ -97,7 +156,7 @@ func (sh *scheduler) request(from, to ReceiverID, payload interface{}, reqID str
 }
 
 func (sh *scheduler) reply(mi Message, reply interface{}) error {
-	cmd, err := sh.newReplyCmd(mi, reply)
+	cmd, err := newReplyCmd(mi, reply)
 	if err != nil {
 		return err
 	}
@@ -149,7 +208,7 @@ func (sh *scheduler) onRemoveRecv(id ReceiverID) {
 }
 
 func (sh *scheduler) onRecvIdle(id ReceiverID) {
-	cmd, err := sh.newRemoveRecvCmd(id)
+	cmd, err := newRemoveRecvCmd(id)
 	if err != nil {
 		fmt.Printf("[ERROR] received idle timeout for invalid receiver")
 		return
@@ -184,63 +243,4 @@ func (sh *scheduler) context(id ReceiverID) (*context, error) {
 
 func (sh *scheduler) isStopped() bool {
 	return atomic.LoadUint32(&sh.stopped) == 1
-}
-
-func (sh *scheduler) newSendCmd(from, to ReceiverID, payload interface{}) (*sendMsgCmd, error) {
-	if to == "" {
-		return nil, ErrInvalidMsgTo
-	}
-	if payload == nil {
-		return nil, ErrInvalidMsgPayload
-	}
-
-	return &sendMsgCmd{
-		message: message{
-			from:    from,
-			to:      to,
-			payload: payload,
-		},
-		replyCh: make(chan error, 1),
-	}, nil
-}
-
-func (sh *scheduler) newRequestCmd(from, to ReceiverID, payload interface{}, reqID string) (*sendMsgCmd, error) {
-	if from == "" {
-		return nil, ErrInvalidMsgFrom
-	}
-
-	cmd, err := sh.newSendCmd(from, to, payload)
-	if err != nil {
-		return nil, err
-	}
-
-	cmd.replyTo = from
-	cmd.reqID = reqID
-
-	return cmd, nil
-}
-
-func (sh *scheduler) newReplyCmd(req Message, reply interface{}) (*sendMsgCmd, error) {
-	rm, ok := req.(*message)
-	if !ok {
-		return nil, ErrContextMsg
-	}
-
-	cmd, err := sh.newSendCmd(rm.to, rm.from, reply)
-	if err != nil {
-		return nil, err
-	}
-
-	cmd.reqID = rm.reqID
-	cmd.replyTo = rm.replyTo
-
-	return cmd, nil
-}
-
-func (sh *scheduler) newRemoveRecvCmd(id ReceiverID) (*removeRecvCmd, error) {
-	if id == "" {
-		return nil, ErrInvalidRecvID
-	}
-
-	return &removeRecvCmd{id: id}, nil
 }
