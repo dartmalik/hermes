@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -206,7 +207,86 @@ func BenchmarkCreationAndSends(b *testing.B) {
 	}
 }
 
+type BatchRequest struct {
+	O       int
+	N       int
+	replyCh chan error
+}
+
+func newBatchRequester() Receiver {
+	return func(ctx Context, mi Message) {
+		switch msg := mi.Payload().(type) {
+		case *Joined:
+
+		case *BatchRequest:
+			to := ReceiverID(fmt.Sprintf("rep-%d", msg.O))
+			req := &Ping{}
+			repChs := make([]<-chan Message, msg.N)
+			for ri := 0; ri < msg.N; ri++ {
+				ch, err := ctx.Request(to, req)
+				if err != nil {
+					msg.replyCh <- err
+					return
+				}
+				repChs[ri] = ch
+			}
+
+			for _, replyCh := range repChs {
+				ri := <-replyCh
+				_, ok := ri.Payload().(*Pong)
+				if !ok {
+					msg.replyCh <- errors.New("invalid_reply")
+					return
+				}
+			}
+
+			msg.replyCh <- nil
+		}
+	}
+}
+
+func newBatchReplier() Receiver {
+	reply := &Pong{}
+	return func(ctx Context, mi Message) {
+		switch mi.Payload().(type) {
+		case *Joined:
+
+		case *Ping:
+			ctx.Reply(mi, reply)
+		}
+	}
+}
+
 func BenchmarkRequests(b *testing.B) {
+	opts := NewOpts()
+	opts.RF = func(id ReceiverID) (Receiver, error) {
+		if strings.HasPrefix(string(id), "req") {
+			return newBatchRequester(), nil
+		} else {
+			return newBatchReplier(), nil
+		}
+	}
+	net, err := New(opts)
+	if err != nil {
+		b.Fatalf("new actor system failed with error: %s\n", err.Error())
+	}
+
+	fmt.Printf("running test with runs: %d\n", b.N)
+
+	batch(b.N, BenchmarkBatchNum, func(offset, runs int) {
+		replyCh := make(chan error, 1)
+		to := ReceiverID(fmt.Sprintf("req-%d", offset))
+		net.Send("", to, &BatchRequest{O: offset, N: runs, replyCh: replyCh})
+		err := <-replyCh
+		if err != nil {
+			fmt.Printf("failed with error: %s\n", err.Error())
+		}
+	})
+
+	Delete(&net)
+}
+
+func BenchmarkCreationAndRequests(b *testing.B) {
 	opts := NewOpts()
 	opts.RF = func(id ReceiverID) (Receiver, error) {
 		a := &PongActor{}
