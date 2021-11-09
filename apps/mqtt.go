@@ -11,7 +11,7 @@ import (
 
 func main() {
 	opts := hermes.NewOpts()
-	opts.RF = factory
+	opts.RF = newRecvFactory()
 	net, err := hermes.New(opts)
 	if err != nil {
 		fmt.Printf("[FATAL] unable to create hermes: %s\n", err.Error())
@@ -40,30 +40,32 @@ func main() {
 	srv.ListenAndServe()
 }
 
-var inMemStore = mqtt.NewInMemSessionStore()
+func newRecvFactory() hermes.ReceiverFactory {
+	var inMemStore = mqtt.NewInMemSessionStore()
 
-func factory(id hermes.ReceiverID) (hermes.Receiver, error) {
-	if mqtt.IsClientID(id) {
-		return mqtt.NewClientRecv(), nil
-	} else if mqtt.IsSessionID(id) {
-		r, err := mqtt.NewSessionRecv(inMemStore, 1*time.Second)
-		if err != nil {
-			return nil, err
+	return func(id hermes.ReceiverID) (hermes.Receiver, error) {
+		if mqtt.IsClientID(id) {
+			return mqtt.NewClientRecv(), nil
+		} else if mqtt.IsSessionID(id) {
+			r, err := mqtt.NewSessionRecv(inMemStore, 1*time.Second)
+			if err != nil {
+				return nil, err
+			}
+
+			return r, nil
+		} else if mqtt.IsPubSubID(id) {
+			r, err := mqtt.NewPubSubRecv(mqtt.NewInMemMsgStore())
+			if err != nil {
+				return nil, err
+			}
+
+			return r, nil
+		} else if mqtt.IsEventBusID(id) {
+			return mqtt.NewEventBusRecv(), nil
+		} else if mqtt.IsLWTID(id) {
+			return mqtt.NewLWTRecv(), nil
 		}
 
-		return r, nil
-	} else if mqtt.IsPubSubID(id) {
-		r, err := mqtt.NewPubSubRecv(mqtt.NewInMemMsgStore())
-		if err != nil {
-			return nil, err
-		}
-
-		return r, nil
-	} else if mqtt.IsEventBusID(id) {
-		return mqtt.NewEventBusRecv(), nil
-	} else if mqtt.IsLWTID(id) {
-		return mqtt.NewLWTRecv(), nil
+		return nil, errors.New("unknown_receiver")
 	}
-
-	return nil, errors.New("unknown_receiver")
 }
